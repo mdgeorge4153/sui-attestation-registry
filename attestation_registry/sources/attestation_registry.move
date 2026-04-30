@@ -145,8 +145,10 @@ public fun is_effective<T: store>(self: &Attestation<T>, clock: &Clock): bool {
 /// - Top-level: `{subject}`, `{attester}`, `{data}`, `{status}`
 /// - T's own fields are under `{data.<field>}` (e.g. `{data.score}`)
 ///
-/// A `status` display field is appended automatically; the call aborts if
-/// `fields` already contains that key.
+/// Two display fields are appended automatically: `status` (renders the variant
+/// name for every attestation) and `expires_at` (renders an ISO 8601 timestamp
+/// for the `ActiveUntil` variant; absent for `Active`/`Revoked`). The call
+/// aborts if `fields` already contains either of those keys.
 public fun register_display<T: store>(
     _: Permit<T>,
     display_registry: &mut DisplayRegistry,
@@ -155,7 +157,9 @@ public fun register_display<T: store>(
     ctx: &mut TxContext,
 ) {
     fields.push_back(b"status".to_string());
-    values.push_back(b"{status.expires_at_ms:ts | status}".to_string());
+    values.push_back(b"{status}".to_string());
+    fields.push_back(b"expires_at".to_string());
+    values.push_back(b"{status.expires_at_ms:ts}".to_string());
 
     // Caller's `Permit<T>` proves they own `T`'s defining module.
     // We mint `Permit<Attestation<T>>` ourselves (only this module can,
