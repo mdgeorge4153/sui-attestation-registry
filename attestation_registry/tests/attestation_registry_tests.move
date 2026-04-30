@@ -10,7 +10,6 @@ use attestation_registry::attestation_registry::{
     EAttestationAlreadyExists,
     ENotAttester,
     EAlreadyRevoked,
-    EDisplayAlreadyRegistered,
 };
 
 const ALICE: address = @0xA11CE;
@@ -167,45 +166,8 @@ fun test_double_revoke_aborts() {
     scenario.end();
 }
 
-#[test]
-fun test_register_display_happy() {
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
-
-    scenario.next_tx(ALICE);
-    let mut registry: Registry = scenario.take_shared();
-    attestation_registry::register_display<Audit>(
-        internal::permit<Audit>(),
-        &mut registry,
-        vector[],
-        vector[],
-        scenario.ctx(),
-    );
-    test_scenario::return_shared(registry);
-    scenario.end();
-}
-
-#[test, expected_failure(abort_code = EDisplayAlreadyRegistered)]
-fun test_double_register_display_aborts() {
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
-
-    scenario.next_tx(ALICE);
-    let mut registry: Registry = scenario.take_shared();
-    attestation_registry::register_display<Audit>(
-        internal::permit<Audit>(),
-        &mut registry,
-        vector[],
-        vector[],
-        scenario.ctx(),
-    );
-    attestation_registry::register_display<Audit>(
-        internal::permit<Audit>(),
-        &mut registry,
-        vector[],
-        vector[],
-        scenario.ctx(),
-    );
-    test_scenario::return_shared(registry);
-    scenario.end();
-}
+// `register_display` cannot be unit-tested here: it needs the system
+// `DisplayRegistry` (shared at `0xd`), and the only way to create one in tests
+// is `display_registry::create_for_testing`, which is `public(package)` to the
+// `sui` framework. Coverage for that flow needs integration testing on
+// devnet/testnet.

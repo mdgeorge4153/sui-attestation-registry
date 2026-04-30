@@ -4,9 +4,7 @@ use std::internal::Permit;
 use std::string::String;
 use sui::clock::Clock;
 use sui::derived_object;
-use sui::display;
-use sui::dynamic_field as df;
-use sui::package::{Self, Publisher};
+use sui::display_registry::{Self, DisplayRegistry};
 
 /// Aborts when an attestation for `(registry, T, subject, sender)` already exists.
 const EAttestationAlreadyExists: u64 = 0;
@@ -17,24 +15,15 @@ const ENotAttester: u64 = 1;
 /// Aborts when revoking an already-revoked attestation.
 const EAlreadyRevoked: u64 = 2;
 
-/// Aborts when a `Display<Attestation<T>>` has already been registered for `T`.
-const EDisplayAlreadyRegistered: u64 = 3;
-
-/// One-time witness, consumed in `init` to mint a `Publisher`.
-public struct ATTESTATION_REGISTRY has drop {}
-
-/// Shared singleton. Parents all derived attestation objects and holds the
-/// `Publisher` used to authorize `Display<Attestation<T>>` creation.
+/// Shared singleton. Parent UID for all derived attestation objects.
 public struct Registry has key {
     id: UID,
-    publisher: Publisher,
 }
 
+// TODO: The derived object should be a Box which owns the attestations, rather
+// than each attestation being its own derived object.
 /// Derivation key for an attestation's address. Never stored — constructed at
 /// attest-time, hashed by `derived_object::claim`, then dropped.
-//
-// TODO: The derived object should be a Box which owns the attestations, rather
-// than each attestation being its own derived object
 public struct AttestationKey<phantom T> has copy, drop, store {
     subject: ID,
     attester: address,
@@ -42,8 +31,7 @@ public struct AttestationKey<phantom T> has copy, drop, store {
 
 /// Current state of an `Attestation`. `ActiveUntil` carries its expiration; a
 /// stored `Expired` variant is deliberately omitted because Move can't transition
-/// state based on time — use `is_expired(&clock)` or `is_effective(&clock)` to
-/// derive that from the clock.
+/// state based on time — use `is_effective(&clock)` to derive that from the clock.
 public enum Status has copy, drop, store {
     Active,
     ActiveUntil { expires_at_ms: u64 },
@@ -60,19 +48,11 @@ public struct Attestation<T: store> has key {
     status: Status,
 }
 
-/// Claim a `Publisher` from the OTW, wrap it in a `Registry`, and share it.
-fun init(otw: ATTESTATION_REGISTRY, ctx: &mut TxContext) {
-    let publisher = package::claim(otw, ctx);
+/// Create the `Registry` singleton at publish time.
+fun init(ctx: &mut TxContext) {
     transfer::share_object(Registry {
         id: object::new(ctx),
-        publisher,
     });
-}
-
-// NOTE: code quality checklist; test-only functions go at the end
-#[test_only]
-public fun init_for_testing(ctx: &mut TxContext) {
-    init(ATTESTATION_REGISTRY {}, ctx);
 }
 
 /// Create a shared `Attestation<T>` at the deterministic address derived from
@@ -83,8 +63,7 @@ public fun attest<T: store>(
     data: T,
     ctx: &mut TxContext,
 ): ID {
-    // TODO: use receiver syntax
-    attest_internal(registry, subject, data, option::none(), ctx)
+    registry.attest_internal(subject, data, option::none(), ctx)
 }
 
 /// As `attest`, but additionally sets `expires_at_ms` (Unix milliseconds).
@@ -95,7 +74,7 @@ public fun attest_with_expiry<T: store>(
     expires_at_ms: u64,
     ctx: &mut TxContext,
 ): ID {
-    attest_internal(registry, subject, data, option::some(expires_at_ms), ctx)
+    registry.attest_internal(subject, data, option::some(expires_at_ms), ctx)
 }
 
 fun attest_internal<T: store>(
@@ -158,11 +137,9 @@ public fun is_effective<T: store>(self: &Attestation<T>, clock: &Clock): bool {
     }
 }
 
-/// Dynamic-field marker recording that a `Display<Attestation<T>>` has been registered.
-public struct DisplayRegistered<phantom T>() has copy, drop, store;
-
-/// Publish an immutable `Display<Attestation<T>>`. Authorized by `Permit<T>`, so
-/// only `T`'s defining module can call this, and only once per `T`.
+/// Publish an immutable `Display<Attestation<T>>` via the system display
+/// registry. Authorized by `Permit<T>`, so only `T`'s defining module can call
+/// this; one-per-T enforcement is provided by `display_registry`.
 ///
 /// Template strings in `values` reference fields of `Attestation<T>`:
 /// - Top-level: `{subject}`, `{attester}`, `{data}`, `{status}`
@@ -172,23 +149,32 @@ public struct DisplayRegistered<phantom T>() has copy, drop, store;
 /// `fields` already contains that key.
 public fun register_display<T: store>(
     _: Permit<T>,
-    registry: &mut Registry,
+    display_registry: &mut DisplayRegistry,
     mut fields: vector<String>,
     mut values: vector<String>,
     ctx: &mut TxContext,
 ) {
-    assert!(
-        !df::exists_(&registry.id, DisplayRegistered<T>()),
-        EDisplayAlreadyRegistered,
-    );
-    df::add(&mut registry.id, DisplayRegistered<T>(), true);
     fields.push_back(b"status".to_string());
     values.push_back(b"{status.expires_at_ms:ts | status}".to_string());
-    // TODO: this uses display v1; in display v2 we need permit not publisher,
-    // so we don't need to store it in the registry
-    let mut display = display::new_with_fields<Attestation<T>>(
-        &registry.publisher, fields, values, ctx,
+
+    // Caller's `Permit<T>` proves they own `T`'s defining module.
+    // We mint `Permit<Attestation<T>>` ourselves (only this module can,
+    // since `Attestation` is defined here) to satisfy V2's API.
+    let (mut display, cap) = display_registry::new<Attestation<T>>(
+        display_registry,
+        internal::permit<Attestation<T>>(),
+        ctx,
     );
-    display::update_version(&mut display);
-    transfer::public_freeze_object(display);
+    fields.zip_do!(values, |field, value| display.set(&cap, field, value));
+    display_registry::share(display);
+
+    // Burn the `DisplayCap` so the templates are permanently immutable. There's
+    // no public destructor on `DisplayCap`, so transfer-to-`@0x0` is the
+    // closest we can get to making it unreachable.
+    transfer::public_transfer(cap, @0x0);
+}
+
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ctx);
 }
