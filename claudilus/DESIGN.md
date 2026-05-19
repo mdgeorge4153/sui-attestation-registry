@@ -1018,6 +1018,28 @@ should lose trust.
    skill" needs a per-package parent query or a known-types registry.
    Verify against the `accessing-data` skill / current indexer docs.
 
+9. **Externalizing enclave operation.** Today one "auditor" both
+   authors the skill and operates the enclave. Splitting those —
+   letting a skill author deploy onto an enclave someone else runs —
+   was considered and deferred: the operator bears each audit's
+   *variable* cost (Claude tokens, gas, Walrus writes) under a *flat*
+   `fee`, and pricing that back to the operator pushes toward the
+   per-token fees §7 rejects for side-channel reasons. Rather than
+   reopen that, v1 keeps the fused role. A decentralized enclave-compute
+   marketplace looks like a better direction than building an
+   in-protocol operator role: **Marlin Oyster** (listed in Nautilus's
+   community dev tools) runs Nitro enclaves from a supplied Docker
+   image, with deterministic builds and on-chain PCR verification, and
+   no direct AWS account / networking / attestation-infrastructure
+   management. That removes the operational burden a skill author would
+   otherwise carry, keeps compute payment off-protocol (the author
+   rents enclave time directly), and fits the Nautilus
+   `EnclaveConfig`/`register_enclave` model claudilus already uses — so
+   the on-chain `fee` can stay flat and cover only the skill IP. One
+   detail to confirm before relying on it: that Oyster exposes the raw
+   Nitro attestation document `register_enclave` verifies, not only a
+   derived PCR value.
+
 ## 10. References
 
 - `attestation_registry/sources/attestation_registry.move` — the
