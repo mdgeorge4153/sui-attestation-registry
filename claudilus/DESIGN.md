@@ -133,9 +133,13 @@ Nitro verification.
 3. Auditor creates a Nautilus `EnclaveConfig` recording the EIF's PCRs.
    The Nautilus `Cap` is used here and then becomes inert — claudilus
    does **not** rotate images (see §6, "no rotation").
-4. Auditor publishes a `Skill<S>` object on Sui (referencing the skill
-   blob and the `EnclaveConfig`; carrying pricing) and receives a
-   `SkillCap<S>`.
+4. Auditor publishes a small Move package — the **skill package** —
+   that defines a one-time witness type `S` and, in its `init`, calls
+   `claudilus::skill::new` to create the `Skill<S>` object (referencing
+   the skill blob and the `EnclaveConfig`; carrying pricing). Publishing
+   mints the `Skill<S>` and returns a `SkillCap<S>` to the auditor.
+   Because `S` is a one-time witness, exactly one `Skill<S>` ever exists
+   — the skill *is* its package (see §4).
 5. Auditor launches the enclave on AWS. It boots, generates an ephemeral
    Ed25519 keypair, and produces a Nitro attestation over the pubkey.
    Anyone calls `enclave::register_enclave`, which verifies the Nitro
@@ -223,12 +227,17 @@ stateDiagram-v2
 
 ## 4. On-chain types (Move-level sketch)
 
-Field lists are sketches and will evolve. Type parameter `S` is a
-per-skill phantom witness type, so an `AuditCap` for one skill cannot
-be used with another.
+Field lists are sketches and will evolve. Type parameter `S` is the
+skill package's one-time witness (explained under `Skill<S>` below).
+Threading it through every type — `Skill<S>`, `SkillCap<S>`,
+`AuditCap<S>`, `ClauditRequest<S>`, `Attestation<Claudit<S>>` — makes
+"belongs to this skill" a compile-time fact: an `AuditCap` for one
+skill cannot be passed where another's is expected, with no runtime ID
+check. This holds only because `S` is 1:1 with `Skill` — the one-time
+witness is what guarantees that.
 
 ```mermaid
-flowchart TD
+flowchart LR
     Skill[Skill] -->|created with| SkillCap[SkillCap]
     SkillCap -->|mints| AuditCap[AuditCap<br/>scoped to pkg_id]
     AuditCap -->|authorizes| Req[ClauditRequest]
@@ -241,8 +250,8 @@ flowchart TD
 ### `Skill<S>`
 
 The auditor's published skill. Pinned to one enclave image and one
-skill blob — to change either, the auditor publishes a *new* `Skill`
-(see §6, "no rotation").
+skill blob — to change either, the auditor publishes a *new skill
+package* (see §6, "no rotation").
 
 ```move
 public struct Skill<phantom S: drop> has key {
@@ -255,7 +264,32 @@ public struct Skill<phantom S: drop> has key {
     lock_window_ms: u64,          // how long start_audit locks a request
     // ... display metadata, version, etc.
 }
+
+// Called once, from the skill package's `init`. Consuming the
+// one-time witness `S` is what guarantees a single Skill<S>.
+public fun new<S: drop>(
+    _: S,
+    skill_blob: vector<u8>,
+    enclave_config: ID,
+    fee: u64,
+    report_size: u64,
+    retention_epochs: u32,
+    lock_window_ms: u64,
+    ctx: &mut TxContext,
+): (Skill<S>, SkillCap<S>) { /* ... */ }
 ```
+
+**`S` is a one-time witness.** A one-time witness (OTW) is a Move
+pattern: a struct with only the `drop` ability, named after its module
+in all-caps, that the runtime constructs *exactly once* and passes to
+that module's `init` function. Because `new` consumes an `S` value and
+the only `S` that will ever exist is the one delivered to the skill
+package's `init`, `new` can be called at most once — so there is
+exactly one `Skill<S>` per skill package, forever. That 1:1 guarantee
+is what makes the phantom-`S` scoping above sound: `S` doesn't merely
+*tag* a skill, it *is* the skill's identity. A skill is therefore a
+Move package, and "publishing a new skill" means publishing a new
+package (§6, "no rotation").
 
 The `fee` is the only claudilus-collected charge (SUI). There is no
 stored payment-destination address: `finish_audit` *returns* the fee
@@ -277,7 +311,8 @@ inspect or re-deploy their own skill). Created alongside the `Skill`.
 
 `SkillCap` does **not** confer the ability to mutate the `Skill` —
 the `Skill` is immutable, so there is nothing to mutate. To change the
-skill or the enclave image, the auditor publishes a new `Skill` (§6).
+skill or the enclave image, the auditor publishes a new skill
+package (§6).
 
 ### `AuditCap<S>`
 
@@ -613,10 +648,11 @@ audits — past reports stay bound to the caps that requested them.
 
 A `Skill` is pinned to one enclave image and one skill blob. There is
 no upgrade or rotation mechanism — to change the image or the skill,
-the auditor publishes a *new* `Skill`. This is deliberate: an
-attestation from image X and one from image Y are genuinely
-incomparable artifacts, and a rotation mechanism would paper over that.
-"Upgrading a skill" is just publishing a new skill. (Continuity of
+the auditor publishes a *new skill package* (a new one-time witness
+`S`, a new `Skill<S>`). This is deliberate: an attestation from image X
+and one from image Y are genuinely incomparable artifacts, and a
+rotation mechanism would paper over that. "Upgrading a skill" is just
+publishing a new skill package. (Continuity of
 *reputation* across an auditor's skill versions is a real need, but a
 cross-cutting one — see §9.)
 
