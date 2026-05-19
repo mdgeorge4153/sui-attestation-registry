@@ -98,9 +98,10 @@ Anything in this list can break claudilus's guarantees if it misbehaves:
   caps or read the skill.
 - **The source-validation attestation system** (§5) — claudilus trusts
   source-validation attestations to bind submitted source to a
-  published package. This binding is load-bearing for skill-IP
-  protection (it stops the skill being run on arbitrary code — §8), so
-  the validation system is in claudilus's TCB.
+  published package. This binding is load-bearing: it is what prevents
+  an `AuditCap` for any trivial package from becoming a license to
+  scan *other* packages for exploitable vulnerabilities (§8). The
+  validation system is therefore in claudilus's TCB.
 
 Explicitly *not* in the TCB:
 
@@ -622,9 +623,9 @@ claudilus audits *source*, but access is gated by *published package
 ID* (the `AuditCap` is scoped to a `pkg_id`). For that gate to be
 meaningful, claudilus must be sure the submitted `Source` actually
 corresponds to the package — otherwise an `AuditCap` for a trivial
-package becomes a general-purpose "run the skill on anything" license,
-which would let an attacker characterize the skill by feeding it
-arbitrary inputs (§8).
+package becomes a general-purpose vulnerability scanner: an attacker
+could run the skill against arbitrary packages and harvest exploitable
+findings in code they don't own (§8).
 
 claudilus does **not** perform source validation itself. Instead, it
 *requires a source-validation attestation as input* to `request_audit`.
@@ -888,13 +889,19 @@ can still audit successive versions of *their own* code and learn from
 the results — but that is the service working as intended, not an
 attack.
 
-### Skill characterization without source validation
+### Ungated vulnerability scanning without source validation
 
-If source validation were skipped, an `AuditCap` for any trivial
-package would let the holder run the skill on arbitrary inputs and
-characterize its behavior. This is why source validation is
-load-bearing for skill-IP protection and the validation system is in
-the TCB (§1, §5).
+Without source validation, an `AuditCap` for any trivial package would
+let its holder run the skill against arbitrary code — including code
+in packages they don't own. The skill would faithfully report
+exploitable findings on whatever it was pointed at, turning the cap
+into a vulnerability scanner against the ecosystem. Source validation
+is what stops this: the submitted `Source` must validate against the
+cap's `pkg_id`'s on-chain bytecode, so the skill only ever runs on
+code the cap holder owns. This is why the validation system is in the
+TCB (§1, §5). (A secondary effect — being able to characterize the
+skill's behavior by feeding it arbitrary inputs — is real but lesser;
+see §6.)
 
 ### Auditor key compromise
 
