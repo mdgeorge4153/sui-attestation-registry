@@ -173,16 +173,16 @@ Nitro attestation verification happens exactly once, at registration.
    customer relationship: one cap per (skill, package) the auditor has
    agreed to serve.
 2. **Request.** Submitter calls `request_audit`, providing the
-   `AuditCap`, the `Source` (§4), a source-validation attestation
-   (§5), the SUI `fee` coin, a Walrus `Storage` resource, and a
-   `write_fee` WAL coin. The submitter pre-reserves the `Storage`
-   from Walrus (`reserve_space`, paid in WAL) — this can be the same
-   PTB as `request_audit`. The constructor verifies the validation
+   `AuditCap`, the `Source` (§4), a source-validation attestation (§5),
+   the SUI `fee` coin, and a WAL coin covering Walrus storage at the
+   current Walrus price (`reserve_space`'s cost for the skill's fixed
+   `report_size`/`retention_epochs`, plus `register_blob`'s
+   `write_payment`). The constructor verifies the validation
    attestation binds the source to `audit_cap.pkg_id`, verifies the
-   `fee` amount and that the `Storage` matches the skill's
-   `report_size`/`retention_epochs`, escrows everything, records the
-   `AuditCap`'s ID, produces a `ClauditRequest<S>` in state `OPEN`,
-   and **emits a `ClauditRequestCreated` event**.
+   `fee` amount and that the escrowed WAL meets the deterministic
+   storage cost, escrows everything, records the `AuditCap`'s ID,
+   produces a `ClauditRequest<S>` in state `OPEN`, and **emits a
+   `ClauditRequestCreated` event**.
 3. **Start.** The auditor's off-chain harness (§5) is watching for
    `ClauditRequestCreated` events; it picks up the new request and
    calls `start_audit(&mut request)`: `OPEN → STARTED`, locking the
@@ -196,9 +196,10 @@ Nitro attestation verification happens exactly once, at registration.
    completion message binding `request_id` to those values. It hands
    `{ciphertext, completion signature}` to the harness. The enclave
    makes no Sui or Walrus calls itself.
-5. **Register.** The harness submits `register_blob` (tx 1): it
-   consumes the request's escrowed `Storage` and `write_fee`,
-   registering the report blob on Walrus, and transitions the request
+5. **Register.** The harness submits tx 1: a PTB that calls Walrus's
+   `reserve_space` (consuming the request's escrowed WAL to mint a
+   `Storage` for the report) and then `register_blob` (consuming that
+   `Storage` to register the report blob), and transitions the request
    `STARTED → SETTLING`. It then uploads the ciphertext to Walrus
    storage nodes and collects the storage-node quorum confirmation.
    Registration must precede the upload — storage nodes confirm only
@@ -321,10 +322,10 @@ package (§6, "no rotation").
 
 The `fee` is the only claudilus-collected charge (SUI) — escrowed and
 paid out per §7. Storage is *not* a claudilus fee — the submitter
-pre-purchases a Walrus `Storage` resource directly (§7). `report_size`
-is fixed so the report blob's size leaks nothing about audit content
-(a side channel — see §6/§7) and so the `Storage` reservation is one
-deterministic value.
+pre-pays Walrus storage in WAL directly (§7). `report_size` is fixed
+so the report blob's size leaks nothing about audit content (a side
+channel — see §6/§7) and so the storage cost is one deterministic WAL
+amount.
 
 The `Skill` object is **immutable** once published — pinned to one
 skill blob and one `EnclaveConfig` (§6, "no rotation").
@@ -411,43 +412,38 @@ public struct ClauditRequest<phantom S: drop> has key {
     state: RequestState,
 }
 
-// The Walrus prepayment that register_blob consumes. Escrowed until it
-// is either spent (register_blob) or returned (cancel_req).
-public struct StoragePayment has store {
-    storage: Storage,             // Walrus Storage, pre-reserved by the submitter
-    write_fee: Balance<WAL>,      // WAL for the register_blob write payment (§7)
-}
-
 public enum RequestState has store {
-    Open      { storage_payment: StoragePayment },
-    Started   { storage_payment: StoragePayment, started_at_ms: u64 },
-    Failed    { storage_payment: StoragePayment, reason: String },  // terminal; cancel_req only
-    Settling  { started_at_ms: u64 },   // register_blob done — storage payment spent (§7)
+    Open      { storage_wal: Balance<WAL> },
+    Started   { storage_wal: Balance<WAL>, started_at_ms: u64 },
+    Failed    { storage_wal: Balance<WAL>, reason: String },  // terminal; cancel_req only
+    Settling  { started_at_ms: u64 },                         // tx 1 done — WAL spent (§7)
 }
 ```
 
-The escrowed `Storage`/`write_fee` live inside the state, not as bare
-`ClauditRequest` fields: they are present in `Open`/`Started`/`Failed`
-and *gone* in `Settling`, and that presence is exactly what the state
-records. `cancel_req` returns whatever the current variant still holds
-(plus `fee`), so it needs no special-casing. `register_blob` carries
-`started_at_ms` forward unchanged into `Settling`, so a single
-`started_at_ms + lock_window_ms` deadline covers the whole audit —
-start through settlement. `lock_window_ms` is therefore the auditor's
-advertised *total* time-to-completion, not a per-phase budget that
-would silently double.
+The escrowed `storage_wal` lives inside the state, not as a bare
+`ClauditRequest` field: present in `Open`/`Started`/`Failed` and *gone*
+in `Settling`, since tx 1 consumes it (§7). `cancel_req` returns
+whatever the current variant still holds (plus `fee`), so it needs no
+special-casing. tx 1 carries `started_at_ms` forward unchanged into
+`Settling`, so a single `started_at_ms + lock_window_ms` deadline
+covers the whole audit — start through settlement. `lock_window_ms` is
+therefore the auditor's advertised *total* time-to-completion, not a
+per-phase budget that would silently double.
 
 The constructor (`request_audit`) requires an `&AuditCap<S>`, a
-source-validation attestation, the SUI `fee` coin, a Walrus `Storage`
-resource, and the `write_fee` WAL. It checks the cap's `pkg_id`, the
-attestation's source↔package binding, the exact `fee` amount, and that
-the `Storage` resource matches the skill's `report_size` (encoded) and
-`retention_epochs`. It records `object::id(audit_cap)`, which is both
-the Seal encryption identity and the decryption gate (§6). The
-source-validation attestation is *checked* here but not retained — a
-consumer who later wants the source↔package proof finds the
-attestation by registry query on `(source_hash, pkg_id)`. (`Storage`
-and `Blob` are Walrus types — first-class Sui objects; see §7.)
+source-validation attestation, the SUI `fee` coin, and the WAL coin
+covering Walrus storage (`reserve_space`'s cost for the skill's fixed
+`report_size`/`retention_epochs`, plus `register_blob`'s
+`write_payment`). It checks the cap's `pkg_id`, the attestation's
+source↔package binding, the exact `fee` amount, and that the escrowed
+WAL meets the deterministic storage cost. The `Storage` resource is
+*not* escrowed: tx 1 creates and consumes it transiently (§7). It
+records `object::id(audit_cap)`, which is both the Seal encryption
+identity and the decryption gate (§6). The source-validation
+attestation is *checked* here but not retained — a consumer who later
+wants the source↔package proof finds the attestation by registry query
+on `(source_hash, pkg_id)`. (`Storage` and `Blob` are Walrus types —
+first-class Sui objects; see §7.)
 
 ### `Audit<S>`
 
@@ -573,9 +569,10 @@ Responsibilities:
   the `Source` locator, `audit_cap_id`, `report_size`.
 - **Receive** the enclave's outputs — the encrypted bundle ciphertext,
   the completion signature, and the `blob_id`/`root_hash`/`size`.
-- **Register** — submit `register_blob` (tx 1, `STARTED → SETTLING`),
-  then upload the ciphertext to Walrus storage nodes and collect the
-  quorum confirmation (§7).
+- **Register** — submit tx 1: a PTB of `reserve_space` (from the
+  escrowed WAL) + `register_blob`, with the state transition `STARTED →
+  SETTLING`. Then upload the ciphertext to Walrus storage nodes and
+  collect the quorum confirmation (§7).
 - **Settle** — submit tx 2: the PTB composing `certify_blob` with
   `finish_audit`, which routes the fee.
 
@@ -777,21 +774,22 @@ to a fixed `report_size` so its size leaks nothing. Flat fees and fixed
 sizes keep settlement disclosure minimal — "an audit completed for this
 request," nothing more. The auditor absorbs cost variance across audits.
 
-**Storage is pre-paid by the submitter, not a claudilus fee.** Walrus
-storage is bought as a `Storage` *resource* — a first-class Sui object
-representing reserved capacity (bytes × epochs), acquired via
-`reserve_space` and paid in WAL. The submitter reserves a `Storage`
-sized for the skill's fixed `report_size` and `retention_epochs`
-(deterministic, since the size is fixed) and escrows it directly in
-the `ClauditRequest`. No fronting, no reimbursement, no SUI↔WAL
-conversion inside the protocol — the submitter pays Walrus directly
-for their own report's storage, and the `Storage` object simply
-travels with the request.
+**Storage is pre-paid by the submitter in WAL, not a claudilus fee.**
+Walrus storage costs WAL: `reserve_space` mints a `Storage` resource
+(reserved capacity, bytes × epochs) and `register_blob` takes a
+separate `write_payment`. claudilus escrows the WAL for both inside the
+request; the `Storage` itself is *never* escrowed — tx 1 calls
+`reserve_space` and `register_blob` in one PTB, creating and consuming
+the `Storage` transiently. No fronting, no reimbursement, no SUI↔WAL
+conversion inside the protocol.
 
-One Walrus detail: registering a blob also takes a small **write
-payment** in WAL (`register_blob`'s `write_payment` argument), separate
-from the storage reservation. The submitter escrows that too, as the
-request's `write_fee` — a fixed amount, since the blob size is fixed.
+The escrowed amount is exact: `report_size`, `retention_epochs`, and
+the write payment are all fixed, so the cost is deterministic at the
+Walrus storage price at request time. That price can in principle move
+between request and tx 1, but the window is one audit (minutes)
+against Walrus's per-epoch price-setting cadence, so the practical
+risk is small. If the price did rise past the escrowed amount, tx 1
+reverts and the submitter cancels (full WAL refund) and resubmits.
 
 ### Settlement
 
@@ -800,13 +798,14 @@ it *after* — a storage node issues the quorum confirmation only for an
 already-registered blob. So settlement is **two transactions**, not
 one (verified against the Walrus contracts).
 
-**tx 1 — `register_blob`.** The harness calls Walrus's `register_blob`
-with the enclave-signed `blob_id`/`root_hash`/`size`, consuming the
-request's escrowed `Storage` and `write_fee`. This yields a registered
-(not yet certified) `Blob`, held by the harness, and transitions the
-request `STARTED → SETTLING`. The harness then uploads the bundle
-ciphertext to the Walrus storage nodes and collects the BLS quorum
-confirmation.
+**tx 1 — `reserve_space` + `register_blob`.** A PTB that mints a
+`Storage` from the request's escrowed WAL (`reserve_space` with the
+skill's `report_size`/`retention_epochs`) and immediately consumes it
+via `register_blob` with the enclave-signed `blob_id`/`root_hash`/
+`size`. This yields a registered (not yet certified) `Blob`, held by
+the harness, and transitions the request `STARTED → SETTLING`. The
+harness then uploads the bundle ciphertext to the Walrus storage nodes
+and collects the BLS quorum confirmation.
 
 **tx 2 — `certify_blob` + `finish_audit`.** A PTB composing Walrus's
 `certify_blob` (which consumes the quorum confirmation, yielding a
@@ -822,7 +821,7 @@ atomically within tx 2. Settlement does not mint an
 optional choice (§3 step 8).
 
 **The accepted loss.** Between tx 1 and tx 2 the request sits in
-`SETTLING` with its `Storage`/`write_fee` already spent on Walrus. If
+`SETTLING` with its WAL prepayment already spent on Walrus. If
 the operator never submits tx 2, the submitter's storage prepayment is
 gone — paid to Walrus, not pocketed by anyone — even though no `Audit`
 resulted. claudilus does *not* try to claw this back (no Walrus storage
@@ -849,18 +848,10 @@ returns it.
   allowed while `OPEN`, while `FAILED`, or while `STARTED`/`SETTLING`
   after the lock window has expired. It consumes the request and
   *returns* whatever the current state still escrows. From
-  `OPEN`/`STARTED`/`FAILED` that is the full set — `fee` SUI, the
-  `Storage` resource, and the `write_fee` WAL. From `SETTLING` it is
-  the `fee` SUI only; the `Storage`/`write_fee` are already spent
-  (the accepted loss, above). One code path, no per-state
+  `OPEN`/`STARTED`/`FAILED` that is the full set — `fee` SUI and the
+  storage WAL. From `SETTLING` it is the `fee` SUI only; the WAL is
+  already spent (the accepted loss, above). One code path, no per-state
   special-casing — it just returns the contents of the state variant.
-
-  When a pre-registration cancel returns the `Storage`, it comes back
-  as an *object*, not a WAL refund — `reserve_space` has no inverse,
-  so the capacity stays committed for its epoch range. The submitter
-  keeps a reusable, transferable `Storage` object: use it for a
-  resubmission, transfer or sell it, or let it lapse. Its value decays
-  as epochs pass, since the reserved window shrinks.
 - **No wall-clock timeout.** A request sits until started, finished,
   failed, or cancelled. The submitter monitors and cancels when they
   decide a request is stale.
