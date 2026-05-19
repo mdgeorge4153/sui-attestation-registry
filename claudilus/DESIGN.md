@@ -424,7 +424,7 @@ public enum RequestState has store {
     Open      { storage_payment: StoragePayment },
     Started   { storage_payment: StoragePayment, started_at_ms: u64 },
     Failed    { storage_payment: StoragePayment, reason: String },  // terminal; cancel_req only
-    Settling  { settling_at_ms: u64 },  // register_blob done — storage payment spent (§7)
+    Settling  { started_at_ms: u64 },   // register_blob done — storage payment spent (§7)
 }
 ```
 
@@ -432,11 +432,12 @@ The escrowed `Storage`/`write_fee` live inside the state, not as bare
 `ClauditRequest` fields: they are present in `Open`/`Started`/`Failed`
 and *gone* in `Settling`, and that presence is exactly what the state
 records. `cancel_req` returns whatever the current variant still holds
-(plus `fee`), so it needs no special-casing. The `Settling` variant
-carries `settling_at_ms` — stamped fresh when `register_blob` runs — so
-the submitter's lock window applies to settlement too: if the operator
-registers but never finishes, `cancel_req` becomes available once
-`settling_at_ms + lock_window_ms` has passed.
+(plus `fee`), so it needs no special-casing. `register_blob` carries
+`started_at_ms` forward unchanged into `Settling`, so a single
+`started_at_ms + lock_window_ms` deadline covers the whole audit —
+start through settlement. `lock_window_ms` is therefore the auditor's
+advertised *total* time-to-completion, not a per-phase budget that
+would silently double.
 
 The constructor (`request_audit`) requires an `&AuditCap<S>`, a
 source-validation attestation, the SUI `fee` coin, a Walrus `Storage`
