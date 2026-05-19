@@ -23,18 +23,27 @@ Two roles, and the design is shaped by what each needs to keep private:
   auditor has two goals. First, keep the skill **confidential**: it is
   the IP they monetize. Second, ensure the skill only ever runs on code
   the requester is entitled to audit — code they "own." Without that
-  second constraint an `AuditCap` would become a general-purpose "run
-  my skill on anything" oracle, letting an attacker characterize the
-  skill from its outputs. The auditor runs the enclave and sets the
+  second constraint an `AuditCap` would become a general-purpose
+  vulnerability scanner: an attacker could run the skill against
+  protocols they *don't* own and harvest exploitable findings before
+  the owners ever see them. The auditor runs the enclave and sets the
   price.
 - A **submitter** holds an `AuditCap` — a per-package capability the
   auditor mints and hands them. With it they request audits of their
   package and decrypt the resulting reports. The submitter's goals are
-  also about confidentiality: keep their **source code** private
-  (closed-source, or a pre-publication candidate) and keep their
-  **audit reports** private — an unfixed finding should not be public.
-  Typically the submitter is the package owner, though the auditor
-  decides who to mint to.
+  also about confidentiality: keep their **source code** private (the
+  package's bytecode is published on chain; only the source is
+  withheld) and keep their **audit reports** private — an unfixed
+  finding should not be public. Typically the submitter is the package
+  owner, though the auditor decides who to mint to.
+
+claudilus deliberately audits only **already-published** packages: both
+the `AuditCap` and the §5 source-validation bind to an on-chain package
+ID, which a pre-publication candidate does not have. Auditing code
+*before* it ships is a real need, but a different problem — ownership
+and source-binding would have to be established some other way (e.g.
+against an `UpgradeCap` or a developer identity) — and is out of scope
+here. A separate mechanism could cover it without disturbing this one.
 
 Each audit — a *claudit* — produces an encrypted report stored on
 Walrus. If the package passes, the report carries a signed attestation
@@ -129,14 +138,20 @@ Nitro verification.
    blob) so the build is reproducible — anyone can rebuild the EIF and
    confirm its PCRs. The EIF bundles whatever skill-specific tooling the
    skill needs (Claude API client, Move compiler, etc.).
-2. Auditor Seal-encrypts the skill content and uploads it to Walrus.
-3. Auditor creates a Nautilus `EnclaveConfig` recording the EIF's PCRs.
+2. Auditor creates a Nautilus `EnclaveConfig` recording the EIF's PCRs.
    The Nautilus `Cap` is used here and then becomes inert — claudilus
    does **not** rotate images (see §6, "no rotation").
+3. Auditor generates a fresh random Seal identity, Seal-encrypts the
+   skill content under it, and uploads the ciphertext to Walrus. The
+   identity is per-skill (a random nonce, not the `EnclaveConfig` ID —
+   one EIF may host many skills); it is recorded in the `Skill<S>` as
+   `skill_seal_id` so the enclave and the `SkillCap` holder know what
+   to ask Seal for.
 4. Auditor publishes a small Move package — the **skill package** —
    that defines a one-time witness type `S` and, in its `init`, calls
    `claudilus::skill::new` to create the `Skill<S>` object (referencing
-   the skill blob and the `EnclaveConfig`; carrying pricing). Publishing
+   the skill blob, the `EnclaveConfig`, and `skill_seal_id`; carrying
+   pricing). Publishing
    mints the `Skill<S>` and returns a `SkillCap<S>` to the auditor.
    Because `S` is a one-time witness, exactly one `Skill<S>` ever exists
    — the skill *is* its package (see §4).
@@ -168,61 +183,72 @@ Nitro attestation verification happens exactly once, at registration.
    `report_size`/`retention_epochs`, escrows everything, records the
    `AuditCap`'s ID, produces a `ClauditRequest<S>` in state `OPEN`,
    and **emits a `ClauditRequestCreated` event**.
-3. **Start.** The auditor's off-chain scheduler is watching for
-   `ClauditRequestCreated` events; it picks up the new request and the
-   auditor calls `start_audit(&mut request)`: `OPEN → STARTED`, locking
-   the request against cancellation for `Skill.lock_window_ms`.
-4. **Audit.** The enclave fetches and Seal-decrypts the skill, fetches
-   the source (Walrus blob if private, git if public), and runs the
-   skill. It produces an encrypted output bundle (§5) **padded to the
-   skill's fixed `report_size`**, computes the bundle's Walrus
-   `blob_id` and `root_hash` (both derivable off-chain from the
-   content), uploads the bytes to Walrus storage nodes, and collects
-   the storage-node quorum confirmation. It then produces a public
-   completion signature whose payload carries the blob metadata and
-   the `certify_blob` arguments.
-5. **Finish.** Auditor submits `finish_audit` as a PTB, presenting
-   `&SkillCap<S>` (so only the auditor can call it). It verifies the
-   completion signature against `Enclave<S>`, then: registers the blob
-   against the request's escrowed `Storage` (`register_blob`, paying
-   the Walrus write fee from the request's `write_fee`), certifies it
-   with the enclave-supplied quorum confirmation (`certify_blob`),
-   consumes the `ClauditRequest`, produces a shared `Audit<S>` holding
-   the certified `Blob`, and **returns the `fee` `Coin`** — the
-   auditor's PTB routes it wherever they want.
-   *Or* the auditor calls `fail_audit(request, reason)`: this does
-   **not** consume the request — it transitions it to the terminal
-   `FAILED` state and emits a failure event carrying the reason. A
-   `FAILED` request cannot be restarted; the submitter reclaims their
-   fees through the ordinary `cancel_req` path. (A transient blip
-   needs no `fail_audit` at all — the auditor just retries inside the
-   lock window. `fail_audit` means "giving up.") Keeping `fail_audit`
-   a pure state transition means `cancel_req` is the single code path
-   that ever reclaims escrowed funds.
-6. **Receive.** Submitter decrypts the report by presenting their
+3. **Start.** The auditor's off-chain harness (§5) is watching for
+   `ClauditRequestCreated` events; it picks up the new request and
+   calls `start_audit(&mut request)`: `OPEN → STARTED`, locking the
+   request against cancellation for `Skill.lock_window_ms`.
+4. **Audit.** The enclave fetches and Seal-decrypts the skill (cached
+   after first use — the skill is immutable), fetches the source
+   (Walrus blob if private, git if public), and runs the skill. It
+   produces an encrypted output bundle (§5) **padded to the skill's
+   fixed `report_size`**, encodes it to compute the Walrus `blob_id`,
+   `root_hash`, and `size` (pure computation — no network), and signs a
+   completion message binding `request_id` to those values. It hands
+   `{ciphertext, completion signature}` to the harness. The enclave
+   makes no Sui or Walrus calls itself.
+5. **Register.** The harness submits `register_blob` (tx 1): it
+   consumes the request's escrowed `Storage` and `write_fee`,
+   registering the report blob on Walrus, and transitions the request
+   `STARTED → SETTLING`. It then uploads the ciphertext to Walrus
+   storage nodes and collects the storage-node quorum confirmation.
+   Registration must precede the upload — storage nodes confirm only
+   registered blobs — which is why this is a separate transaction from
+   settlement (§7).
+6. **Finish.** The harness submits tx 2: a PTB composing Walrus's
+   `certify_blob` (with the quorum confirmation) and claudilus's
+   `finish_audit`, presenting `&SkillCap<S>` (so only the auditor can
+   call it). `finish_audit` verifies the completion signature against
+   `Enclave<S>`, checks the certified `Blob`'s `blob_id` matches the
+   signed value, consumes the `ClauditRequest`, produces a shared
+   `Audit<S>` holding the certified `Blob`, and **returns the `fee`
+   `Coin`** for the auditor's PTB to route.
+   *Or*, from `STARTED`, the auditor calls `fail_audit(request,
+   reason)`: a pure state transition `STARTED → FAILED` (terminal),
+   emitting a failure event with the reason. A `FAILED` request cannot
+   be restarted; the submitter reclaims escrow through `cancel_req`. (A
+   transient blip needs no `fail_audit` — the auditor retries inside
+   the lock window; `fail_audit` means "giving up.") `fail_audit` is
+   not available once `SETTLING`: by then the costly on-chain step is
+   done, and a stalled operator is handled by `cancel_req` after the
+   lock window.
+7. **Receive.** Submitter decrypts the report by presenting their
    `AuditCap` to the feedback-access `seal_approve` policy (§6),
    getting Seal key shares, and decrypting the Walrus blob.
-7. **Publish (optional).** If the verdict is clean, the decrypted
+8. **Publish (optional).** If the verdict is clean, the decrypted
    bundle contains a signed "passed" attestation. The submitter can
    submit it to mint an `Attestation<Claudit<S>>` in the registry —
    the public "passed" signal. Failing audits produce no such
    signature and cannot be published through this path.
 
 If the request is never started, the submitter can `cancel_req` for a
-refund at any time. Once `STARTED`, cancellation is blocked until the
-lock window expires — or, sooner, once the auditor moves the request
-to `FAILED` via `fail_audit`, from which `cancel_req` is immediately
-available.
+full refund at any time. Once `STARTED` or `SETTLING`, cancellation
+is blocked until the lock window expires — or, from `STARTED`, sooner
+once the auditor moves the request to `FAILED` via `fail_audit`. A
+cancel from `OPEN`, `STARTED`, or `FAILED` returns everything escrowed;
+a cancel from `SETTLING` returns only the SUI `fee` — the Walrus
+prepayment is already spent (§7, "the accepted loss").
 
 ```mermaid
 stateDiagram-v2
     [*] --> Open: request_audit (submitter)
-    Open --> Started: start_audit (auditor)
+    Open --> Started: start_audit (harness)
     Started --> Failed: fail_audit → reason event
-    Open --> [*]: cancel_req → refund
-    Started --> [*]: finish_audit → Audit + pay auditor
-    Started --> [*]: cancel_req after lock window → refund
-    Failed --> [*]: cancel_req → refund
+    Started --> Settling: register_blob (tx 1)
+    Settling --> [*]: certify_blob + finish_audit (tx 2) → Audit + pay auditor
+    Open --> [*]: cancel_req → full refund
+    Started --> [*]: cancel_req after lock window → full refund
+    Failed --> [*]: cancel_req → full refund
+    Settling --> [*]: cancel_req after lock window → SUI refund only
 ```
 
 ## 4. On-chain types (Move-level sketch)
@@ -241,7 +267,7 @@ flowchart LR
     Skill[Skill] -->|created with| SkillCap[SkillCap]
     SkillCap -->|mints| AuditCap[AuditCap<br/>scoped to pkg_id]
     AuditCap -->|authorizes| Req[ClauditRequest]
-    Req -->|finish_audit consumes| Audit[Audit<br/>shared]
+    Req -->|register_blob then finish_audit| Audit[Audit<br/>shared]
     Audit -->|if clean: mint| Att[Attestation Claudit<br/>in registry]
     Skill -.references.-> EC[EnclaveConfig<br/>Nautilus]
     EC -.register_enclave.-> Enc[Enclave<br/>Nautilus]
@@ -257,6 +283,7 @@ package* (see §6, "no rotation").
 public struct Skill<phantom S: drop> has key {
     id: UID,
     skill_blob: vector<u8>,       // Walrus blob ID — encrypted skill content
+    skill_seal_id: vector<u8>,    // per-skill Seal identity the skill blob is encrypted under
     enclave_config: ID,           // Nautilus EnclaveConfig for this skill's EIF
     fee: u64,                     // flat per-claudit audit fee, in MIST (SUI)
     report_size: u64,             // fixed report blob size; every report is padded to this
@@ -270,6 +297,7 @@ public struct Skill<phantom S: drop> has key {
 public fun new<S: drop>(
     _: S,
     skill_blob: vector<u8>,
+    skill_seal_id: vector<u8>,
     enclave_config: ID,
     fee: u64,
     report_size: u64,
@@ -370,9 +398,10 @@ their source under it before requesting.
 ### `ClauditRequest<S>`
 
 A pending audit request. Created by `request_audit`; consumed by
-`finish_audit` (→ `Audit`) or `cancel_req` (→ refund). `fail_audit`
-does not consume it — it moves the request to the terminal `FAILED`
-state (`STARTED → FAILED`), from which only `cancel_req` can fire.
+`finish_audit` (→ `Audit`) or `cancel_req` (→ refund). `start_audit`,
+`register_blob`, and `fail_audit` only transition its `state` — the
+request object itself survives until `finish_audit` or `cancel_req`
+consumes it.
 
 ```move
 public struct ClauditRequest<phantom S: drop> has key {
@@ -380,18 +409,34 @@ public struct ClauditRequest<phantom S: drop> has key {
     pkg_id: ID,
     source: Source,
     audit_cap_id: ID,             // ID of the AuditCap used — the Seal identity (§6)
-    fee_paid: Balance<SUI>,       // the audit fee, returned to the auditor at finish
-    storage: Storage,             // Walrus Storage resource, pre-reserved by submitter
-    write_fee: Balance<WAL>,      // WAL for the register_blob write payment (§7)
+    fee: Balance<SUI>,            // audit fee — escrowed until finish_audit or cancel_req
     state: RequestState,
 }
 
-public enum RequestState has copy, drop, store {
-    Open,
-    Started { started_at_ms: u64 },
-    Failed { reason: String },        // terminal for the audit; only cancel_req remains
+// The Walrus prepayment that register_blob consumes. Escrowed until it
+// is either spent (register_blob) or returned (cancel_req).
+public struct StoragePayment has store {
+    storage: Storage,             // Walrus Storage, pre-reserved by the submitter
+    write_fee: Balance<WAL>,      // WAL for the register_blob write payment (§7)
+}
+
+public enum RequestState has store {
+    Open      { storage_payment: StoragePayment },
+    Started   { storage_payment: StoragePayment, started_at_ms: u64 },
+    Failed    { storage_payment: StoragePayment, reason: String },  // terminal; cancel_req only
+    Settling  { settling_at_ms: u64 },  // register_blob done — storage payment spent (§7)
 }
 ```
+
+The escrowed `Storage`/`write_fee` live inside the state, not as bare
+`ClauditRequest` fields: they are present in `Open`/`Started`/`Failed`
+and *gone* in `Settling`, and that presence is exactly what the state
+records. `cancel_req` returns whatever the current variant still holds
+(plus `fee`), so it needs no special-casing. The `Settling` variant
+carries `settling_at_ms` — stamped fresh when `register_blob` runs — so
+the submitter's lock window applies to settlement too: if the operator
+registers but never finishes, `cancel_req` becomes available once
+`settling_at_ms + lock_window_ms` has passed.
 
 The constructor (`request_audit`) requires an `&AuditCap<S>`, a
 source-validation attestation, the SUI `fee` coin, a Walrus `Storage`
@@ -405,8 +450,8 @@ consumer who later wants the source↔package proof finds the
 attestation by registry query on `(source_hash, pkg_id)`. There is no
 `funder` field: refunds (`cancel_req`) and the fee payout
 (`finish_audit`) are *returned* to their caller's PTB rather than
-pushed to a stored address. (`Storage` and `Blob`, below, are Walrus
-types — first-class Sui objects; see §7.)
+pushed to a stored address. (`Storage` and `Blob` are Walrus types —
+first-class Sui objects; see §7.)
 
 ### `Audit<S>`
 
@@ -440,12 +485,23 @@ signal; the payload is metadata-only.
 ```move
 public struct Claudit<phantom S: drop> has store {
     pkg_id: ID,
-    source_hash: vector<u8>,      // what was audited
-    source_path: vector<u8>,      // human-readable locator (git path, etc.)
+    source_hash: vector<u8>,      // commitment to the exact source bytes audited
+    source: Source,               // structured locator — see §4 `Source`
     skill_id: ID,                 // how — which skill
     report_blob: vector<u8>,      // Walrus blob ID of the encrypted report
 }
 ```
+
+`source_hash` is the uniform commitment to the exact plaintext the
+enclave audited; `source` is the structured locator reused from §4.
+The two are not redundant: `Source::Private` carries only a
+`walrus_blob` ID, which hashes the *ciphertext* and so cannot stand in
+for a plaintext commitment — hence the separate `source_hash`, present
+for both variants. For a private-source audit the published `Claudit`
+therefore carries `Source::Private { walrus_blob }`, a pointer to
+encrypted bytes; that is acceptable — publication is opt-in (§6) and
+the blob stays encrypted — it merely advertises "this was a
+closed-source audit."
 
 `skill_id` alone pins both the enclave image and the skill content:
 the `Skill` is immutable, so `skill_id → Skill → enclave_config →`
@@ -498,13 +554,48 @@ opaque identity tag and doesn't implement any authorization logic
 itself; that lives in the policy module, which gates decryption on
 holding the cap whose ID is the identity.
 
+The skill blob is immutable, so the enclave Seal-decrypts it once and
+caches the plaintext for its process lifetime — no per-claudit fetch.
+Decryption can only happen *after* `register_enclave` (Seal verifies
+the enclave's signature against the on-chain `Enclave<S>`), so it is
+not a boot-time step; eager-decrypt-right-after-registration and
+lazy-decrypt-on-first-claudit are both fine. An instance that serves
+more than one skill uses a bounded (LRU) cache; the common
+one-skill-per-instance case is a single slot.
+
+### Auditor harness
+
+The off-chain process that runs *outside* the enclave, on the parent
+EC2 host. The enclave has no Sui keypair and no event subscription; the
+harness is what connects it to Sui. It is auditor-operated and holds
+the auditor's Sui keypair plus SUI/WAL for gas and Walrus writes.
+Responsibilities:
+
+- **Watch** the chain for `ClauditRequestCreated` events.
+- **Start** each request — submit `start_audit` (`OPEN → STARTED`).
+- **Forward** the request to the enclave over the parent-EC2 channel:
+  the `Source` locator, `audit_cap_id`, `report_size`.
+- **Receive** the enclave's outputs — the encrypted bundle ciphertext,
+  the completion signature, and the `blob_id`/`root_hash`/`size`.
+- **Register** — submit `register_blob` (tx 1, `STARTED → SETTLING`),
+  then upload the ciphertext to Walrus storage nodes and collect the
+  quorum confirmation (§7).
+- **Settle** — submit tx 2: the PTB composing `certify_blob` with
+  `finish_audit`, which routes the fee.
+
+It is purely a courier and transaction submitter: it never sees skill
+or report plaintext (both stay encrypted end to end) and cannot forge
+results (those need the enclave's Ed25519 key). A compromised harness
+can stall or censor requests but cannot fabricate an audit.
+
 ### Encrypted skill blob
 
-A Walrus blob, Seal-encrypted so the key releases only to the
-registered enclave (the skill-access policy verifies an Ed25519
-signature against `Enclave<S>`). The skill content — prompt template,
-tooling config, scoring rubric — is confidential auditor IP. Only the
-enclave (at runtime) and the auditor (via `SkillCap`) can decrypt it.
+A Walrus blob, Seal-encrypted under the per-skill `skill_seal_id`
+identity so the key releases only to the registered enclave (the
+skill-access policy verifies an Ed25519 signature against `Enclave<S>`)
+or the `SkillCap` holder. The skill content — prompt template, tooling
+config, scoring rubric — is confidential auditor IP. Only the enclave
+(at runtime) and the auditor (via `SkillCap`) can decrypt it.
 
 ### Encrypted output bundle
 
@@ -523,11 +614,14 @@ content. Contents:
 
 Alongside the bundle, the enclave produces a **public completion
 signature** over `IntentMessage{Completion, ts, payload}`, where the
-payload carries `request_id` plus the Walrus blob metadata and the
-`certify_blob` arguments (`blob_id`, `root_hash`, `size`, the quorum
-confirmation `signature`/`signers_bitmap`/`message`). `finish_audit`
-uses it both to verify the audit ran and to register + certify the
-blob. It carries no audit content and no token count.
+payload carries `request_id` and the blob commitment the enclave
+computed by encoding the bundle: `blob_id`, `root_hash`, `size`. That
+is all — the enclave does *not* sign the storage-node quorum
+confirmation; that is collected by the harness directly from the
+storage nodes and fed straight to `certify_blob` (§7). `finish_audit`
+uses the completion signature to verify the audit ran and to check
+that the certified `Blob`'s `blob_id` is the one the enclave produced.
+It carries no audit content and no token count.
 
 ### Source validation
 
@@ -710,57 +804,82 @@ request's `write_fee` — a fixed amount, since the blob size is fixed.
 
 ### Settlement
 
-Settlement runs as a single PTB the auditor submits, composing Walrus's
-blob-registration calls with claudilus's `finish_audit` Move function.
-The PTB uses the blob metadata and quorum confirmation from the
-completion signature's payload to call Walrus's `register_blob`
-(consuming the request's escrowed `Storage`, paying the write fee from
-`write_fee`) and `certify_blob`, yielding a certified `Blob`.
+Walrus registers a blob *before* its bytes are uploaded and certifies
+it *after* — a storage node issues the quorum confirmation only for an
+already-registered blob. So settlement is **two transactions**, not
+one (verified against the Walrus contracts).
 
-`finish_audit` itself is a Move function (called within that PTB,
-requiring `&SkillCap<S>` so only the auditor can call it). It verifies
-the completion signature against `Enclave<S>`, consumes the
-`ClauditRequest`, produces the shared `Audit<S>` holding the certified
-`Blob`, and *returns* the `fee_paid` `Coin` to the PTB for the auditor
-to route as they wish. Because it all happens in one PTB, the blob
-registration and the claudilus settlement commit atomically.
-Settlement does not mint an `Attestation<Claudit<S>>` — publication is
-the submitter's separate, optional choice (§3 step 7).
+**tx 1 — `register_blob`.** The harness calls Walrus's `register_blob`
+with the enclave-signed `blob_id`/`root_hash`/`size`, consuming the
+request's escrowed `Storage` and `write_fee`. This yields a registered
+(not yet certified) `Blob`, held by the harness, and transitions the
+request `STARTED → SETTLING`. The harness then uploads the bundle
+ciphertext to the Walrus storage nodes and collects the BLS quorum
+confirmation.
+
+**tx 2 — `certify_blob` + `finish_audit`.** A PTB composing Walrus's
+`certify_blob` (which consumes the quorum confirmation, yielding a
+certified `Blob`) with claudilus's `finish_audit`, which requires
+`&SkillCap<S>` so only the auditor can call it. `finish_audit` verifies
+the completion signature against `Enclave<S>`, checks the certified
+`Blob`'s `blob_id` equals the enclave-signed value (so the harness
+cannot substitute a different report), consumes the `ClauditRequest`,
+produces the shared `Audit<S>`, and *returns* the `fee` `Coin` to
+the PTB. The two Walrus calls and the claudilus settlement commit
+atomically within tx 2. Settlement does not mint an
+`Attestation<Claudit<S>>` — publication is the submitter's separate,
+optional choice (§3 step 8).
+
+**The accepted loss.** Between tx 1 and tx 2 the request sits in
+`SETTLING` with its `Storage`/`write_fee` already spent on Walrus. If
+the operator never submits tx 2, the submitter's storage prepayment is
+gone — paid to Walrus, not pocketed by anyone — even though no `Audit`
+resulted. claudilus does *not* try to claw this back (no Walrus storage
+refund, no `Blob` reclamation): it is a small fixed cost, and the
+operator gains nothing by stopping here — the fee is released only by
+`finish_audit` in tx 2, so stalling after tx 1 just forfeits the fee
+and burns the operator's own gas. The SUI audit `fee` stays fully
+protected: a `cancel_req` from `SETTLING` (after the lock window)
+returns it.
 
 ### Failure paths
 
-- **`fail_audit`** — the auditor gives up on a request (external API
-  down, source rejected, capacity, etc.). It does **not** consume the
-  request or move funds: it transitions `STARTED → FAILED` (terminal
-  for the audit) and emits a failure event with a reason string. A
-  `FAILED` request cannot be restarted — retry means the submitter
-  cancels and submits a fresh request. Unilateral auditor option;
-  reputation is the check on misuse.
+- **`fail_audit`** — the auditor gives up on a `STARTED` request
+  (external API down, source rejected, capacity, etc.). A pure state
+  transition `STARTED → FAILED` (terminal); it moves no funds and emits
+  a failure event with a reason string. A `FAILED` request cannot be
+  restarted — retry means `cancel_req` plus a fresh request. It is
+  *not* available from `SETTLING`: once the on-chain registration is
+  done, a stalled operator is handled by `cancel_req`, not
+  `fail_audit`. Unilateral auditor option; reputation is the check on
+  misuse.
 - **`cancel_req`** — the submitter reclaims a stuck or failed request.
   Requires `&AuditCap<S>` (only the cap holder can cancel) and is
-  allowed while `OPEN`, while `FAILED`, or while `STARTED` after the
-  lock window has expired. It consumes the request and *returns*
-  everything escrowed to the caller's PTB: the `fee_paid` SUI, the
-  unused `Storage` resource, and the `write_fee` WAL. This is the
-  single code path that returns escrowed value, keeping refund
-  accounting in one place. (There is no stored `funder` address; the
-  caller's PTB routes the returns.)
+  allowed while `OPEN`, while `FAILED`, or while `STARTED`/`SETTLING`
+  after the lock window has expired. It consumes the request and
+  *returns* whatever the current state still escrows. From
+  `OPEN`/`STARTED`/`FAILED` that is the full set — `fee` SUI, the
+  `Storage` resource, and the `write_fee` WAL. From `SETTLING` it is
+  the `fee` SUI only; the `Storage`/`write_fee` are already spent
+  (the accepted loss, above). One code path, no per-state
+  special-casing — it just returns the contents of the state variant.
+  (There is no stored `funder` address; the caller's PTB routes the
+  returns.)
 
-  Note the `Storage` resource comes back as an *object*, not a WAL
-  refund — Walrus does not refund a `reserve_space` reservation (the
-  capacity is committed for its epoch range). The submitter keeps a
-  reusable, transferable `Storage` object: they can use it for a
-  resubmitted request, transfer or sell it, or let it lapse. Its value
-  decays as epochs pass, since the reserved window shrinks. (I believe
-  Walrus has no reservation-refund path; worth confirming against
-  Walrus docs.)
+  When a pre-registration cancel returns the `Storage`, it comes back
+  as an *object*, not a WAL refund — `reserve_space` has no inverse,
+  so the capacity stays committed for its epoch range. The submitter
+  keeps a reusable, transferable `Storage` object: use it for a
+  resubmission, transfer or sell it, or let it lapse. Its value decays
+  as epochs pass, since the reserved window shrinks.
 - **No wall-clock timeout.** A request sits until started, finished,
   failed, or cancelled. The submitter monitors and cancels when they
   decide a request is stale.
 
-The `STARTED` lock exists so an auditor mid-audit isn't cancelled out
-from under them; `lock_window_ms` (set on `Skill`) bounds how long that
-protection lasts before the submitter regains the ability to cancel.
+The `STARTED`/`SETTLING` lock exists so an operator mid-audit or
+mid-settlement isn't cancelled out from under them; `lock_window_ms`
+(set on `Skill`) bounds how long that protection lasts before the
+submitter regains the ability to cancel.
 
 ## 8. Threats considered
 
