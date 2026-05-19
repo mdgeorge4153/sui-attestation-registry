@@ -319,14 +319,12 @@ is what makes the phantom-`S` scoping above sound: `S` doesn't merely
 Move package, and "publishing a new skill" means publishing a new
 package (§6, "no rotation").
 
-The `fee` is the only claudilus-collected charge (SUI). There is no
-stored payment-destination address: `finish_audit` *returns* the fee
-`Coin` to its caller (the auditor, who must present `&SkillCap<S>`),
-and the auditor's PTB routes it wherever they want. Storage is *not*
-a claudilus fee — the submitter pre-purchases a Walrus `Storage`
-resource directly (§7). `report_size` is fixed so the report blob's
-size leaks nothing about audit content (a side channel — see §6/§7)
-and so the `Storage` reservation is one deterministic value.
+The `fee` is the only claudilus-collected charge (SUI) — escrowed and
+paid out per §7. Storage is *not* a claudilus fee — the submitter
+pre-purchases a Walrus `Storage` resource directly (§7). `report_size`
+is fixed so the report blob's size leaks nothing about audit content
+(a side channel — see §6/§7) and so the `Storage` reservation is one
+deterministic value.
 
 The `Skill` object is **immutable** once published — pinned to one
 skill blob and one `EnclaveConfig` (§6, "no rotation").
@@ -448,11 +446,8 @@ the `Storage` resource matches the skill's `report_size` (encoded) and
 the Seal encryption identity and the decryption gate (§6). The
 source-validation attestation is *checked* here but not retained — a
 consumer who later wants the source↔package proof finds the
-attestation by registry query on `(source_hash, pkg_id)`. There is no
-`funder` field: refunds (`cancel_req`) and the fee payout
-(`finish_audit`) are *returned* to their caller's PTB rather than
-pushed to a stored address. (`Storage` and `Blob` are Walrus types —
-first-class Sui objects; see §7.)
+attestation by registry query on `(source_hash, pkg_id)`. (`Storage`
+and `Blob` are Walrus types — first-class Sui objects; see §7.)
 
 ### `Audit<S>`
 
@@ -728,9 +723,7 @@ caps. Granularity of isolation = granularity of cap minting.
 reports under a cap, a *leaked derived key* (the key leaks but the cap
 doesn't) exposes every report under that cap, not one. The exposure is
 narrow — the cap holder can already decrypt them all — so the
-simplicity (single-assert policy, no `request_id` plumbing) is worth
-it. A per-report identity would compartmentalize key leaks but costs
-an extra field and a two-binding policy; rejected as not worth it.
+single-assert simplicity is worth it.
 
 **Skill author visibility.** If the auditor wants to read reports, they
 mint an `AuditCap` for the relevant package to their own address — they
@@ -751,17 +744,14 @@ publishing a new skill package. (Continuity of
 *reputation* across an auditor's skill versions is a real need, but a
 cross-cutting one — see §9.)
 
-### The AuditCap is the access model — not a pluggable policy
+### The AuditCap is the access model
 
-Earlier drafts framed the cap-gated `seal_approve` as a "reference
-policy," one of several swappable authorization contracts. That
-framing no longer reflects the design: the `AuditCap` is woven through
+claudilus's access model *is* the `AuditCap`. The cap is woven through
 the whole lifecycle — it gates `request_audit`, it *is* the Seal
-encryption identity (`bcs(audit_cap_id)`), and it gates decryption.
-You cannot swap it out without redesigning the request flow. So
-claudilus is honestly **opinionated**: access is AuditCap-based, full
-stop. A fundamentally different access model (subscription NFTs,
-DAO membership) is a fork, not a configuration.
+encryption identity (`bcs(audit_cap_id)`), and it gates decryption — so
+it is not a swappable authorization contract. A fundamentally
+different access model (subscription NFTs, DAO membership) is a fork,
+not a configuration.
 
 What flexibility *does* remain is off-protocol, and belongs to the
 `AuditCap` holder once they've decrypted a report: they can re-share
@@ -864,8 +854,6 @@ returns it.
   the `fee` SUI only; the `Storage`/`write_fee` are already spent
   (the accepted loss, above). One code path, no per-state
   special-casing — it just returns the contents of the state variant.
-  (There is no stored `funder` address; the caller's PTB routes the
-  returns.)
 
   When a pre-registration cancel returns the `Storage`, it comes back
   as an *object*, not a WAL refund — `reserve_space` has no inverse,
