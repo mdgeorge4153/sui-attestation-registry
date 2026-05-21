@@ -1,0 +1,6 @@
+[package]
+name = "custom_payload"
+edition = "2024"
+
+[dependencies]
+attestation_registry = { local = "../registry" }

@@ -8,7 +8,7 @@ const GRPC_URLS: Record<string, string> = {
 // Latest (upgraded) package ID — used for function calls
 export const PACKAGE_IDS: Record<string, string> = {
   testnet:
-    "0xedf62badb49975f9938a6b0595617e9b7611e19f16e7579da05c85d2df1cd780",
+    "0x4f59478c90a6b4fb1c77351c14aa4dfbc463eadfec0657d1a9637516a08a8144",
 };
 
 // Original package ID — used for type queries (struct types are anchored here)

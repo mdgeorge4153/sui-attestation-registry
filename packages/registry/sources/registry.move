@@ -12,6 +12,8 @@ use std::string::String;
 use std::type_name;
 use sui::table::{Self, Table};
 use sui::event;
+use sui::display_registry;
+use attestation_registry::payloads;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -71,6 +73,61 @@ fun init(ctx: &mut TxContext) {
         attestations_by_type: table::new(ctx),
     };
     transfer::share_object(registry);
+}
+
+// ─── Display setup ─────────────────────────────────────────────────
+
+/// Create and share a Display for Attestation<AuditReport>.
+/// Uses `internal::Permit` — no Publisher or OTW needed.
+entry fun setup_audit_report_display(
+    display_reg: &mut display_registry::DisplayRegistry,
+    ctx: &mut TxContext,
+) {
+    let (mut d, cap) =
+        display_registry::new<Attestation<payloads::AuditReport>>(
+            display_reg, internal::permit(), ctx,
+        );
+    display_registry::set(
+        &mut d, &cap,
+        b"name".to_string(), b"Audit Report Attestation".to_string(),
+    );
+    display_registry::set(
+        &mut d, &cap,
+        b"description".to_string(),
+        b"Audit report for package {package_id} by {payload.auditor}".to_string(),
+    );
+    display_registry::set(
+        &mut d, &cap,
+        b"link".to_string(), b"{payload.url}".to_string(),
+    );
+    display_registry::share(d);
+    transfer::public_transfer(cap, ctx.sender());
+}
+
+/// Create and share a Display for Attestation<SourceVerification>.
+entry fun setup_source_verification_display(
+    display_reg: &mut display_registry::DisplayRegistry,
+    ctx: &mut TxContext,
+) {
+    let (mut d, cap) =
+        display_registry::new<Attestation<payloads::SourceVerification>>(
+            display_reg, internal::permit(), ctx,
+        );
+    display_registry::set(
+        &mut d, &cap,
+        b"name".to_string(), b"Source Verification Attestation".to_string(),
+    );
+    display_registry::set(
+        &mut d, &cap,
+        b"description".to_string(),
+        b"Source verification for package {package_id} at revision {payload.revision}".to_string(),
+    );
+    display_registry::set(
+        &mut d, &cap,
+        b"link".to_string(), b"{payload.repo_url}".to_string(),
+    );
+    display_registry::share(d);
+    transfer::public_transfer(cap, ctx.sender());
 }
 
 // ─── Public entry points ────────────────────────────────────────────
