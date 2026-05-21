@@ -1,0 +1,5 @@
+[package]
+name = "attestation_registry"
+edition = "2024"
+
+[dependencies]

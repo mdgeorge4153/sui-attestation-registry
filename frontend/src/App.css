@@ -1,0 +1,290 @@
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #e0e0e0;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+header h1 {
+  font-size: 1.8rem;
+  margin-bottom: 0.25rem;
+  color: #fff;
+}
+
+.subtitle {
+  color: #999;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+
+.connect-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.address {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #333;
+  margin-bottom: 1.5rem;
+}
+
+.tabs button {
+  flex: 1;
+  padding: 0.6rem 1rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tabs button:hover:not(:disabled) {
+  color: #ccc;
+}
+
+.tabs button.active {
+  color: #fff;
+  border-bottom-color: #6c9fff;
+}
+
+.tabs button:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+
+.card {
+  background: #1a1a2e;
+  border: 1px solid #2a2a40;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.card h2 {
+  font-size: 1.2rem;
+  margin: 0 0 1rem 0;
+  color: #fff;
+}
+
+.card h3 {
+  font-size: 1rem;
+  margin: 1rem 0 0.75rem 0;
+  color: #ccc;
+}
+
+form > div {
+  margin-bottom: 0.75rem;
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  color: #999;
+  margin-bottom: 0.25rem;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: #6c9fff;
+}
+
+button[type="submit"],
+.card > form > button {
+  margin-top: 0.5rem;
+  padding: 0.6rem 1.2rem;
+  background: #6c9fff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+button[type="submit"]:hover:not(:disabled) {
+  background: #5580dd;
+}
+
+button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  color: #ff6b6b;
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+.success {
+  color: #6bffb8;
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+.success code {
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.muted {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.results {
+  margin-top: 1rem;
+}
+
+.attestation-card {
+  background: #111;
+  border: 1px solid #2a2a40;
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.field {
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.field .label {
+  display: inline-block;
+  width: 80px;
+  color: #888;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.field code {
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.field a {
+  color: #6c9fff;
+  text-decoration: none;
+}
+
+.field a:hover {
+  text-decoration: underline;
+}
+
+.field ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0 80px;
+}
+
+.field ul li {
+  font-size: 0.85rem;
+  color: #ccc;
+}
+
+.revoke-btn {
+  margin-top: 0.5rem;
+  padding: 0.35rem 0.8rem;
+  background: #442222;
+  color: #ff6b6b;
+  border: 1px solid #663333;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.revoke-btn:hover:not(:disabled) {
+  background: #553333;
+}
+
+.revoke-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filters {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #2a2a40;
+}
+
+.filter-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.filter-row > div {
+  flex: 1;
+}
+
+.keypair-connect {
+  margin-top: 0.5rem;
+}
+
+.connect-form {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.connect-form input {
+  width: 320px;
+  font-size: 0.85rem;
+}
+
+.connect-form button {
+  padding: 0.5rem 1rem;
+  background: #6c9fff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.connect-form button:hover {
+  background: #5580dd;
+}
+
+.disconnect-btn {
+  padding: 0.3rem 0.8rem;
+  background: #333;
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.disconnect-btn:hover {
+  background: #444;
+}
