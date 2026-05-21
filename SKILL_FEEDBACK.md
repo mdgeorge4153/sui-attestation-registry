@@ -368,6 +368,32 @@ documented.
 
 ---
 
+## 17. `internal::Permit<T>` not documented anywhere in the skill set
+
+**Encountered:** `internal::Permit<T>` (from `std::internal`) is a new Move stdlib
+primitive that enables type-level authorization without a One-Time Witness or Publisher.
+It was the key to making Display work cleanly (issue #14) and to making Display
+retroactively addable (issue #15).
+
+**Problem:** No skill mentions `internal::Permit<T>` at all. The `sui-move` skill covers
+OTW and Publisher as the authorization primitives, but `Permit<T>` replaces both for
+several use cases:
+
+- Display creation (`display_registry::new` accepts `Permit<T>`)
+- Type-level authorization in generic registries
+- Any pattern where "only the defining module of T can call this"
+
+**Suggested fix:** The `sui-move` skill should document `internal::Permit<T>` alongside
+OTW and Publisher, with guidance on when to use which:
+
+| Mechanism | When to use |
+|---|---|
+| OTW (`has drop`, module-named) | One-time setup in `init` (coin creation, etc.) |
+| Publisher (`package::claim`) | Proving package authority to external systems |
+| `internal::Permit<T>` | Proving you define type `T` — works in any function, not just `init` |
+
+---
+
 ## Cross-cutting suggestions
 
 1. The skills cover Move design patterns well but underserve the CLI workflow for calling
@@ -381,3 +407,14 @@ documented.
 3. Several issues (1, 6, 7) stem from **API/toolchain changes** that the skills haven't
    caught up with. A versioning or "last verified with CLI vX.Y" note on each skill would
    help identify stale content.
+
+4. The Display skill (issue #14) contains **fabricated API calls** — `borrow_mut()` was
+   never a real function. This is distinct from stale content (issues 1, 6, 7) where the
+   skill was once correct. It suggests the Display skill was written from a design doc or
+   RFC rather than verified against the implementation. Adding a "verified against
+   sui CLI vX.Y" note per skill would catch both stale and speculative content.
+
+5. `internal::Permit<T>` (issue #17) is a new stdlib primitive that simplifies several
+   patterns across multiple skills (Display, authorization, type registries). It warrants
+   coverage in the `sui-move` skill and cross-references from the Display and patterns
+   skills.
