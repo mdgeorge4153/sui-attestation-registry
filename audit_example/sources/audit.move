@@ -2,14 +2,21 @@ module audit_example::audit;
 
 use std::string::String;
 use sui::display_registry::DisplayRegistry;
-use attestation_registry::attestation_registry::{Self, Registry};
+use attestation_registry::attestation_registry::{
+    Self,
+    Box,
+    RevocationCap,
+};
 
+/// Schema for an audit attestation. Defined here so that this package is the
+/// minting authority for `Permit<Audit>`, which gates `attest_as<Audit>`.
 public struct Audit has store, drop {
     score: u8,
 }
 
-/// One-shot setup: register the immutable `Display<Attestation<Audit>>`. Should
-/// be called once shortly after publish. Aborts on second call (V2 enforcement).
+/// One-shot setup: register the immutable `Display<Attestation<Audit>>`.
+/// Should be called once shortly after publish; aborts on second call
+/// (V2 enforcement via `display_registry`).
 public fun register_audit_display(
     display_registry: &mut DisplayRegistry,
     ctx: &mut TxContext,
@@ -26,27 +33,33 @@ public fun register_audit_display(
     );
 }
 
-/// Issue an Audit attestation about `subject` with `score`.
+/// Issue an Audit attestation about the subject owned by `box`. Recorded
+/// `attester` is `audit_example`'s own package address (via `attest_as`).
+/// Returns the cap; the caller decides whether to retain it (to revoke later)
+/// or transfer it (to delegate or commit).
 public fun attest_audit(
-    registry: &mut Registry,
-    subject: ID,
+    box: &mut Box,
     score: u8,
     ctx: &mut TxContext,
-): ID {
-    attestation_registry::attest(registry, subject, Audit { score }, ctx)
+): RevocationCap<Audit> {
+    attestation_registry::attest_as<Audit>(
+        internal::permit<Audit>(),
+        box,
+        Audit { score },
+        ctx,
+    )
 }
 
-/// Issue an Audit attestation that expires at `expires_at_ms` (Unix ms).
+/// As `attest_audit`, but the attestation expires at `expires_at_ms` (Unix ms).
 public fun attest_audit_with_expiry(
-    registry: &mut Registry,
-    subject: ID,
+    box: &mut Box,
     score: u8,
     expires_at_ms: u64,
     ctx: &mut TxContext,
-): ID {
-    attestation_registry::attest_with_expiry(
-        registry,
-        subject,
+): RevocationCap<Audit> {
+    attestation_registry::attest_as_with_expiry<Audit>(
+        internal::permit<Audit>(),
+        box,
         Audit { score },
         expires_at_ms,
         ctx,
