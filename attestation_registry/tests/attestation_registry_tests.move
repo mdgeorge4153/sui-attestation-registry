@@ -1,168 +1,215 @@
 #[test_only]
 module attestation_registry::attestation_registry_tests;
 
-use sui::clock;
 use sui::test_scenario;
+use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{
     Self,
     Registry,
+    Box,
     Attestation,
-    EAttestationAlreadyExists,
-    ENotAttester,
-    EAlreadyRevoked,
+    EBoxAlreadyExists,
+    EWrongAttestationId,
 };
 
 const ALICE: address = @0xA11CE;
-const BOB: address = @0xB0B;
 
-public struct Audit has store, drop {
-    score: u8,
+/// Test-only schema. Defined here so this module is its `Permit<TestSchema>`
+/// minting authority.
+public struct TestSchema has store, drop {
+    tag: u8,
 }
-
-fun new_audit(score: u8): Audit { Audit { score } }
 
 fun subject_for(addr: address): ID { addr.to_id() }
 
+/// Drive a scenario forward to the state where `Box` for `subject` is shared
+/// and ready to be `take_shared`'d.
+fun setup_with_box(subject: ID): test_scenario::Scenario {
+    let mut scenario = test_scenario::begin(ALICE);
+    attestation_registry::init_for_testing(scenario.ctx());
+
+    scenario.next_tx(ALICE);
+    let mut registry: Registry = scenario.take_shared();
+    attestation_registry::create_box(&mut registry, subject);
+    test_scenario::return_shared(registry);
+
+    scenario.next_tx(ALICE);
+    scenario
+}
+
+#[test, expected_failure(abort_code = EBoxAlreadyExists)]
+fun test_create_box_aborts_on_duplicate() {
+    let subject = subject_for(@0xDEAD);
+    let mut scenario = test_scenario::begin(ALICE);
+    attestation_registry::init_for_testing(scenario.ctx());
+
+    scenario.next_tx(ALICE);
+    let mut registry: Registry = scenario.take_shared();
+    attestation_registry::create_box(&mut registry, subject);
+    attestation_registry::create_box(&mut registry, subject);
+    test_scenario::return_shared(registry);
+    scenario.end();
+}
+
 #[test]
 fun test_attest_and_read() {
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
-
-    scenario.next_tx(ALICE);
-    let mut registry: Registry = scenario.take_shared();
-    attestation_registry::attest<Audit>(
-        &mut registry,
-        subject_for(@0xDEAD),
-        new_audit(8),
-        scenario.ctx(),
-    );
-    test_scenario::return_shared(registry);
-
-    scenario.next_tx(ALICE);
-    let att: Attestation<Audit> = scenario.take_shared();
-    let clock = clock::create_for_testing(scenario.ctx());
-    assert!(att.subject() == subject_for(@0xDEAD), 0);
-    assert!(att.attester() == ALICE, 0);
-    assert!(att.data().score == 8, 0);
-    assert!(att.is_effective(&clock), 0);
-    clock::destroy_for_testing(clock);
-    test_scenario::return_shared(att);
-
-    scenario.end();
-}
-
-#[test]
-fun test_attest_with_expiry() {
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
-
-    scenario.next_tx(ALICE);
-    let mut registry: Registry = scenario.take_shared();
-    attestation_registry::attest_with_expiry<Audit>(
-        &mut registry,
-        subject_for(@0xDEAD),
-        new_audit(5),
-        2000,
-        scenario.ctx(),
-    );
-    test_scenario::return_shared(registry);
-
-    scenario.next_tx(ALICE);
-    let att: Attestation<Audit> = scenario.take_shared();
-    let mut clock = clock::create_for_testing(scenario.ctx());
-    clock.set_for_testing(1000);
-    assert!(att.is_effective(&clock), 0);
-    clock.set_for_testing(2500);
-    assert!(!att.is_effective(&clock), 0);
-    clock::destroy_for_testing(clock);
-    test_scenario::return_shared(att);
-
-    scenario.end();
-}
-
-#[test, expected_failure(abort_code = EAttestationAlreadyExists)]
-fun test_double_attest_aborts() {
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
-
-    scenario.next_tx(ALICE);
-    let mut registry: Registry = scenario.take_shared();
     let subject = subject_for(@0xDEAD);
-    attestation_registry::attest<Audit>(&mut registry, subject, new_audit(1), scenario.ctx());
-    attestation_registry::attest<Audit>(&mut registry, subject, new_audit(2), scenario.ctx());
-    test_scenario::return_shared(registry);
+    let mut scenario = setup_with_box(subject);
+
+    let mut box: Box = scenario.take_shared();
+    let cap = attestation_registry::attest<TestSchema>(
+        std::internal::permit<TestSchema>(),
+        &mut box,
+        TestSchema { tag: 42 },
+        scenario.ctx(),
+    );
+
+    // Settle the transfer-to-object so the test runtime sees the attestation
+    // as owned by the box on the next tx.
+    transfer::public_transfer(cap, ALICE);
+    test_scenario::return_shared(box);
+
+    scenario.next_tx(ALICE);
+    let mut box: Box = scenario.take_shared();
+    let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
+        object::id(&box),
+    );
+    assert!(ids.length() == 1, 0);
+    let rcv: Receiving<Attestation<TestSchema>> =
+        test_scenario::receiving_ticket_by_id(ids[0]);
+
+    attestation_registry::with_attestation!<TestSchema>(
+        &mut box,
+        rcv,
+        |a| {
+            assert!(a.subject() == subject, 1);
+            assert!(a.data().tag == 42, 2);
+            assert!(a.is_effective(), 3);
+        },
+    );
+
+    test_scenario::return_shared(box);
     scenario.end();
 }
 
 #[test]
-fun test_revoke_makes_ineffective() {
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
+fun test_reissuance_succeeds() {
+    let subject = subject_for(@0xDEAD);
+    let mut scenario = setup_with_box(subject);
 
-    scenario.next_tx(ALICE);
-    let mut registry: Registry = scenario.take_shared();
-    attestation_registry::attest<Audit>(
-        &mut registry,
-        subject_for(@0xDEAD),
-        new_audit(3),
+    let mut box: Box = scenario.take_shared();
+    let cap1 = attestation_registry::attest<TestSchema>(
+        std::internal::permit<TestSchema>(),
+        &mut box,
+        TestSchema { tag: 1 },
         scenario.ctx(),
     );
-    test_scenario::return_shared(registry);
+    let cap2 = attestation_registry::attest<TestSchema>(
+        std::internal::permit<TestSchema>(),
+        &mut box,
+        TestSchema { tag: 2 },
+        scenario.ctx(),
+    );
+    transfer::public_transfer(cap1, ALICE);
+    transfer::public_transfer(cap2, ALICE);
+    test_scenario::return_shared(box);
 
     scenario.next_tx(ALICE);
-    let mut att: Attestation<Audit> = scenario.take_shared();
-    let clock = clock::create_for_testing(scenario.ctx());
-    assert!(att.is_effective(&clock), 0);
-    attestation_registry::revoke(&mut att, scenario.ctx());
-    assert!(!att.is_effective(&clock), 0);
-    clock::destroy_for_testing(clock);
-    test_scenario::return_shared(att);
+    let box: Box = scenario.take_shared();
+    let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
+        object::id(&box),
+    );
+    // Two distinct attestations owned by the box.
+    assert!(ids.length() == 2, 0);
+    assert!(ids[0] != ids[1], 1);
+    test_scenario::return_shared(box);
+    scenario.end();
+}
+
+#[test]
+fun test_revoke_flips_is_effective() {
+    let subject = subject_for(@0xDEAD);
+    let mut scenario = setup_with_box(subject);
+
+    let mut box: Box = scenario.take_shared();
+    let cap = attestation_registry::attest<TestSchema>(
+        std::internal::permit<TestSchema>(),
+        &mut box,
+        TestSchema { tag: 7 },
+        scenario.ctx(),
+    );
+    transfer::public_transfer(cap, ALICE);
+    test_scenario::return_shared(box);
+
+    // Pre-revoke: read shows Active.
+    scenario.next_tx(ALICE);
+    let mut box: Box = scenario.take_shared();
+    let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
+        object::id(&box),
+    );
+    let id = ids[0];
+    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
+    attestation_registry::with_attestation!<TestSchema>(&mut box, rcv, |a| {
+        assert!(a.is_effective(), 0);
+    });
+    test_scenario::return_shared(box);
+
+    // Revoke.
+    scenario.next_tx(ALICE);
+    let mut box: Box = scenario.take_shared();
+    let cap = scenario.take_from_sender();
+    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
+    attestation_registry::revoke<TestSchema>(&mut box, cap, rcv, scenario.ctx());
+    test_scenario::return_shared(box);
+
+    // Post-revoke: read shows !is_effective.
+    scenario.next_tx(ALICE);
+    let mut box: Box = scenario.take_shared();
+    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
+    attestation_registry::with_attestation!<TestSchema>(&mut box, rcv, |a| {
+        assert!(!a.is_effective(), 1);
+    });
+    test_scenario::return_shared(box);
 
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = ENotAttester)]
-fun test_revoke_non_attester_aborts() {
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
+#[test, expected_failure(abort_code = EWrongAttestationId)]
+fun test_revoke_with_wrong_rcv_aborts() {
+    let subject = subject_for(@0xDEAD);
+    let mut scenario = setup_with_box(subject);
 
-    scenario.next_tx(ALICE);
-    let mut registry: Registry = scenario.take_shared();
-    attestation_registry::attest<Audit>(
-        &mut registry,
-        subject_for(@0xDEAD),
-        new_audit(3),
+    let mut box: Box = scenario.take_shared();
+    let cap_a = attestation_registry::attest<TestSchema>(
+        std::internal::permit<TestSchema>(),
+        &mut box,
+        TestSchema { tag: 1 },
         scenario.ctx(),
     );
-    test_scenario::return_shared(registry);
-
-    scenario.next_tx(BOB);
-    let mut att: Attestation<Audit> = scenario.take_shared();
-    attestation_registry::revoke(&mut att, scenario.ctx());
-    test_scenario::return_shared(att);
-    scenario.end();
-}
-
-#[test, expected_failure(abort_code = EAlreadyRevoked)]
-fun test_double_revoke_aborts() {
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
-
-    scenario.next_tx(ALICE);
-    let mut registry: Registry = scenario.take_shared();
-    attestation_registry::attest<Audit>(
-        &mut registry,
-        subject_for(@0xDEAD),
-        new_audit(3),
+    let cap_b = attestation_registry::attest<TestSchema>(
+        std::internal::permit<TestSchema>(),
+        &mut box,
+        TestSchema { tag: 2 },
         scenario.ctx(),
     );
-    test_scenario::return_shared(registry);
+    // Park cap_a with ALICE; cap_b stays in scope so we can park it after.
+    transfer::public_transfer(cap_a, ALICE);
+    transfer::public_transfer(cap_b, @0x0);
+    test_scenario::return_shared(box);
 
     scenario.next_tx(ALICE);
-    let mut att: Attestation<Audit> = scenario.take_shared();
-    attestation_registry::revoke(&mut att, scenario.ctx());
-    attestation_registry::revoke(&mut att, scenario.ctx());
-    test_scenario::return_shared(att);
+    let mut box: Box = scenario.take_shared();
+    let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
+        object::id(&box),
+    );
+    // Pair cap_a with the wrong attestation's rcv — must abort EWrongAttestationId.
+    let wrong_id = ids[1];
+    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(wrong_id);
+    let cap_a = scenario.take_from_sender();
+    attestation_registry::revoke<TestSchema>(&mut box, cap_a, rcv, scenario.ctx());
+
+    // unreachable — silence move borrow checker
+    test_scenario::return_shared(box);
     scenario.end();
 }
 
@@ -170,4 +217,4 @@ fun test_double_revoke_aborts() {
 // `DisplayRegistry` (shared at `0xd`), and the only way to create one in tests
 // is `display_registry::create_for_testing`, which is `public(package)` to the
 // `sui` framework. Coverage for that flow needs integration testing on
-// devnet/testnet.
+// devnet/testnet or via the forking tool.
