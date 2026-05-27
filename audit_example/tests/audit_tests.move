@@ -11,7 +11,7 @@ const ALICE: address = @0xA11CE;
 fun subject_for(addr: address): ID { addr.to_id() }
 
 /// Verifies the cross-package attest flow: `audit_example::attest_audit`
-/// produces an attestation accessible via `with_attestation!`, and the
+/// produces an attestation accessible via `borrow`/`put_back`, and the
 /// attester resolution (`attester_of<Audit>`) returns audit_example's
 /// package address — distinct from `attestation_registry`'s.
 #[test]
@@ -38,19 +38,14 @@ fun test_attest_audit_cross_package() {
     );
     let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(ids[0]);
 
-    attestation_registry::with_attestation!<Audit>(
-        &mut box,
-        rcv,
-        |a| {
-            assert!(a.subject() == subject, 0);
-            assert!(a.data().score() == 9, 1);
-            assert!(a.is_effective(), 2);
-        },
-    );
+    let (a, b) = attestation_registry::borrow<Audit>(&mut box, rcv);
+    assert!(a.subject() == subject, 0);
+    assert!(a.data().score() == 9, 1);
+    assert!(a.is_effective(), 2);
+    attestation_registry::put_back(&mut box, a, b);
 
     // attester_of<Audit> must resolve to audit_example's package address,
-    // not attestation_registry's. We don't have a hardcoded address to
-    // compare against, but we can compare against attester_of for a type
+    // not attestation_registry's. We compare against attester_of for a type
     // defined in attestation_registry: they must differ.
     let audit_pkg = attestation_registry::attester_of<Audit>();
     let registry_pkg = attestation_registry::attester_of<Registry>();

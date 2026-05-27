@@ -13,9 +13,15 @@ use sui::transfer::Receiving;
 /// Aborts when `create_box` is called twice for the same subject.
 const EBoxAlreadyExists: u64 = 0;
 
-/// Aborts when the `Receiving<Attestation<T>>` ticket passed to `revoke`
-/// doesn't refer to the attestation the `RevocationCap` is keyed to.
-const EWrongAttestationId: u64 = 1;
+/// Aborts when an `AttestationBorrow` hot potato is discharged with the wrong
+/// `Box` or the wrong `Attestation` value (i.e. the hot potato was opened
+/// against a different box/attestation than the one being put back or revoked).
+/// Implementation-oriented; should not occur in well-formed usage.
+const EBorrowMismatch: u64 = 1;
+
+/// Aborts when `revoke` is called with a `RevocationCap` whose
+/// `attestation_id` doesn't match the attestation being revoked.
+const ERevokeMismatch: u64 = 2;
 
 /// Shared singleton, parent UID for every per-subject `Box`.
 public struct Registry has key {
@@ -41,23 +47,24 @@ public enum Status has copy, drop, store {
     Revoked,
 }
 
-// TODO(mike): review macro-vs-invariant tradeoff
 /// Typed attestation about `subject`. Stored as an object owned-by-Box via
 /// transfer-to-object.
 ///
-/// `store` is required because `with_attestation!` expands into caller
-/// modules, which means the put-back-after-borrow must use
-/// `transfer::public_transfer` (works across module boundaries) rather than
-/// the package-private `transfer::transfer`.
-///
-/// **Security-critical invariant**: no public function in this module returns
-/// `Attestation<T>` by value. Consumers borrow via the `with_attestation!`
-/// macro; only `revoke` receives the value internally and immediately
-/// re-transfers it to the owning Box. Adding any public function that returns
-/// or wraps `Attestation<T>` by value would let callers transfer attestations
-/// away from their owning Box, breaking the deterministic-address-per-subject
-/// enumeration property and the cap-keyed revocation model.
-public struct Attestation<T: store> has key, store {
+/// **Lifecycle invariant**: `key`-only (no `store`). External callers who
+/// obtain an `Attestation<T>` by value (via `borrow`) cannot:
+/// (1) transfer it elsewhere — `transfer::public_transfer` requires
+///     `key + store`, and the private `transfer::transfer` is restricted to
+///     this module;
+/// (2) wrap it in another struct — struct fields can hold `key`-only types
+///     only if the enclosing struct doesn't itself need `store`, and Move
+///     forbids storing a `key` object inside another object;
+/// (3) drop it — no `drop` ability.
+/// The only ways to discharge an `Attestation<T>` by value are `put_back`
+/// or `revoke`, both of which re-anchor it at its owning Box. The hot
+/// potato `AttestationBorrow` reinforces this: it has no abilities, so it
+/// must also be passed to one of those discharge functions. Bytecode-
+/// enforced; no discipline note required.
+public struct Attestation<T: store> has key {
     id: UID,
     subject: ID,
     data: T,
@@ -72,6 +79,17 @@ public struct Attestation<T: store> has key, store {
 /// address). To delegate, transfer to a multisig or another address.
 public struct RevocationCap<phantom T> has key, store {
     id: UID,
+    attestation_id: ID,
+}
+
+/// Hot potato handed out alongside an `Attestation<T>` by `borrow`. Has no
+/// abilities (no `drop`, `store`, `copy`, or `key`), so the borrow checker
+/// forces the caller to discharge it via `put_back` or `revoke` before the
+/// transaction ends. Carries the originating box's address and the
+/// attestation's id, both verified by the discharge functions to prevent
+/// the caller from swapping in a different value or a different box.
+public struct AttestationBorrow {
+    box_addr: address,
     attestation_id: ID,
 }
 
@@ -136,20 +154,59 @@ public fun attest<T: store>(
     RevocationCap<T> { id: object::new(ctx), attestation_id }
 }
 
-// TODO(mike): revisit Receiving<T> ergonomics on review
-/// Mark the attestation referenced by `rcv` as revoked. The cap and the
-/// receiving ticket must agree on the attestation id; otherwise aborts
-/// `EWrongAttestationId`.
+/// Receive an attestation out of its `Box` for on-chain inspection. Returns
+/// the `Attestation<T>` value along with a non-droppable `AttestationBorrow`
+/// hot potato that *must* be discharged before the transaction ends —
+/// either by `put_back` (leaving the attestation unchanged) or `revoke`
+/// (transitioning it to `Revoked`). Bytecode-enforced; the type system
+/// forbids any other disposition.
+public fun borrow<T: store>(
+    box: &mut Box,
+    rcv: Receiving<Attestation<T>>,
+): (Attestation<T>, AttestationBorrow) {
+    let a = transfer::receive(&mut box.id, rcv);
+    let attestation_id = object::id(&a);
+    let borrow = AttestationBorrow {
+        box_addr: box.id.to_address(),
+        attestation_id,
+    };
+    (a, borrow)
+}
+
+/// Discharge an `AttestationBorrow` without changes: re-anchor the
+/// attestation at its originating Box. Aborts `EBorrowMismatch` if the
+/// caller supplies a different box or a different attestation than the one
+/// recorded in the hot potato.
+public fun put_back<T: store>(
+    box: &mut Box,
+    attestation: Attestation<T>,
+    borrow: AttestationBorrow,
+) {
+    let AttestationBorrow { box_addr, attestation_id } = borrow;
+    assert!(box.id.to_address() == box_addr, EBorrowMismatch);
+    assert!(object::id(&attestation) == attestation_id, EBorrowMismatch);
+    transfer::transfer(attestation, box_addr);
+}
+
+/// Discharge an `AttestationBorrow` by revoking the attestation. Consumes
+/// the matching `RevocationCap<T>`. Aborts `EBorrowMismatch` if the box or
+/// attestation doesn't match the hot potato; aborts `ERevokeMismatch` if
+/// the cap's recorded `attestation_id` doesn't match the attestation being
+/// revoked.
 public fun revoke<T: store>(
     box: &mut Box,
+    attestation: Attestation<T>,
     cap: RevocationCap<T>,
-    rcv: Receiving<Attestation<T>>,
+    borrow: AttestationBorrow,
     ctx: &TxContext,
 ) {
-    let RevocationCap { id, attestation_id } = cap;
-    object::delete(id);
-    assert!(transfer::receiving_object_id(&rcv) == attestation_id, EWrongAttestationId);
-    let mut a = transfer::receive(&mut box.id, rcv);
+    let AttestationBorrow { box_addr, attestation_id } = borrow;
+    let RevocationCap { id: cap_uid, attestation_id: cap_id } = cap;
+    object::delete(cap_uid);
+    assert!(box.id.to_address() == box_addr, EBorrowMismatch);
+    assert!(object::id(&attestation) == attestation_id, EBorrowMismatch);
+    assert!(cap_id == attestation_id, ERevokeMismatch);
+    let mut a = attestation;
     a.status = Status::Revoked;
     event::emit(Revoked {
         attestation_id,
@@ -157,38 +214,7 @@ public fun revoke<T: store>(
         type_name: type_name::with_original_ids<T>().into_string(),
         revoker: ctx.sender(),
     });
-    transfer::transfer(a, box.id.to_address());
-}
-
-// TODO(mike): review — this leaks &mut UID, letting external callers bypass
-// the with_attestation! discipline. Required because the macro expands in
-// caller-module scope; restricting this to public(package) would block
-// cross-package use of the macro (e.g. verifier packages downstream).
-/// Exposes `&mut UID` of a `Box` so that `with_attestation!` (and any other
-/// macro that needs to do `transfer::receive` against the Box) can expand at
-/// the caller's site. External callers who call `transfer::public_receive`
-/// directly with this UID can extract attestations by value and break the
-/// owned-by-Box enumeration invariant — convention requires using
-/// `with_attestation!` instead.
-public fun box_uid_mut(self: &mut Box): &mut UID { &mut self.id }
-
-/// Inlined receive-then-borrow-then-replace pattern. Expands at the call site
-/// into a three-line `receive` / call closure / `public_transfer` sequence.
-/// Pays the `&mut Box` cost (TTO requires it for the receive call) but lets
-/// callers operate on `&Attestation<T>` without manually shuffling the value.
-///
-/// The closure may not return a value (Move 2024 doesn't have a nameable unit
-/// type for macro return positions). Callers wanting to extract data should
-/// capture into outer variables via `&mut` references in the closure.
-public macro fun with_attestation<$T: store>(
-    $box: &mut Box,
-    $rcv: Receiving<Attestation<$T>>,
-    $f: |&Attestation<$T>|,
-) {
-    let box = $box;
-    let a = sui::transfer::public_receive(box.box_uid_mut(), $rcv);
-    $f(&a);
-    sui::transfer::public_transfer(a, sui::object::id_address(box));
+    transfer::transfer(a, box_addr);
 }
 
 /// The subject this attestation is about.

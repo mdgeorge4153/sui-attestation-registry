@@ -9,7 +9,7 @@ use attestation_registry::attestation_registry::{
     Box,
     Attestation,
     EBoxAlreadyExists,
-    EWrongAttestationId,
+    ERevokeMismatch,
 };
 
 const ALICE: address = @0xA11CE;
@@ -63,9 +63,6 @@ fun test_attest_and_read() {
         TestSchema { tag: 42 },
         scenario.ctx(),
     );
-
-    // Settle the transfer-to-object so the test runtime sees the attestation
-    // as owned by the box on the next tx.
     transfer::public_transfer(cap, ALICE);
     test_scenario::return_shared(box);
 
@@ -78,15 +75,11 @@ fun test_attest_and_read() {
     let rcv: Receiving<Attestation<TestSchema>> =
         test_scenario::receiving_ticket_by_id(ids[0]);
 
-    attestation_registry::with_attestation!<TestSchema>(
-        &mut box,
-        rcv,
-        |a| {
-            assert!(a.subject() == subject, 1);
-            assert!(a.data().tag == 42, 2);
-            assert!(a.is_effective(), 3);
-        },
-    );
+    let (a, b) = attestation_registry::borrow<TestSchema>(&mut box, rcv);
+    assert!(a.subject() == subject, 1);
+    assert!(a.data().tag == 42, 2);
+    assert!(a.is_effective(), 3);
+    attestation_registry::put_back(&mut box, a, b);
 
     test_scenario::return_shared(box);
     scenario.end();
@@ -119,7 +112,6 @@ fun test_reissuance_succeeds() {
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
         object::id(&box),
     );
-    // Two distinct attestations owned by the box.
     assert!(ids.length() == 2, 0);
     assert!(ids[0] != ids[1], 1);
     test_scenario::return_shared(box);
@@ -141,7 +133,7 @@ fun test_revoke_flips_is_effective() {
     transfer::public_transfer(cap, ALICE);
     test_scenario::return_shared(box);
 
-    // Pre-revoke: read shows Active.
+    // Pre-revoke borrow: read shows Active.
     scenario.next_tx(ALICE);
     let mut box: Box = scenario.take_shared();
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
@@ -149,9 +141,9 @@ fun test_revoke_flips_is_effective() {
     );
     let id = ids[0];
     let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
-    attestation_registry::with_attestation!<TestSchema>(&mut box, rcv, |a| {
-        assert!(a.is_effective(), 0);
-    });
+    let (a, b) = attestation_registry::borrow<TestSchema>(&mut box, rcv);
+    assert!(a.is_effective(), 0);
+    attestation_registry::put_back(&mut box, a, b);
     test_scenario::return_shared(box);
 
     // Revoke.
@@ -159,23 +151,24 @@ fun test_revoke_flips_is_effective() {
     let mut box: Box = scenario.take_shared();
     let cap = scenario.take_from_sender();
     let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
-    attestation_registry::revoke<TestSchema>(&mut box, cap, rcv, scenario.ctx());
+    let (a, b) = attestation_registry::borrow<TestSchema>(&mut box, rcv);
+    attestation_registry::revoke<TestSchema>(&mut box, a, cap, b, scenario.ctx());
     test_scenario::return_shared(box);
 
     // Post-revoke: read shows !is_effective.
     scenario.next_tx(ALICE);
     let mut box: Box = scenario.take_shared();
     let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
-    attestation_registry::with_attestation!<TestSchema>(&mut box, rcv, |a| {
-        assert!(!a.is_effective(), 1);
-    });
+    let (a, b) = attestation_registry::borrow<TestSchema>(&mut box, rcv);
+    assert!(!a.is_effective(), 1);
+    attestation_registry::put_back(&mut box, a, b);
     test_scenario::return_shared(box);
 
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = EWrongAttestationId)]
-fun test_revoke_with_wrong_rcv_aborts() {
+#[test, expected_failure(abort_code = ERevokeMismatch)]
+fun test_revoke_with_wrong_cap_aborts() {
     let subject = subject_for(@0xDEAD);
     let mut scenario = setup_with_box(subject);
 
@@ -192,7 +185,6 @@ fun test_revoke_with_wrong_rcv_aborts() {
         TestSchema { tag: 2 },
         scenario.ctx(),
     );
-    // Park cap_a with ALICE; cap_b stays in scope so we can park it after.
     transfer::public_transfer(cap_a, ALICE);
     transfer::public_transfer(cap_b, @0x0);
     test_scenario::return_shared(box);
@@ -202,13 +194,14 @@ fun test_revoke_with_wrong_rcv_aborts() {
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
         object::id(&box),
     );
-    // Pair cap_a with the wrong attestation's rcv — must abort EWrongAttestationId.
-    let wrong_id = ids[1];
-    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(wrong_id);
+    // Borrow attestation B, but use cap_a (which is for A) — must abort.
+    let id_b = ids[1];
+    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id_b);
+    let (a, b) = attestation_registry::borrow<TestSchema>(&mut box, rcv);
     let cap_a = scenario.take_from_sender();
-    attestation_registry::revoke<TestSchema>(&mut box, cap_a, rcv, scenario.ctx());
+    attestation_registry::revoke<TestSchema>(&mut box, a, cap_a, b, scenario.ctx());
 
-    // unreachable — silence move borrow checker
+    // unreachable
     test_scenario::return_shared(box);
     scenario.end();
 }

@@ -52,15 +52,11 @@ fun test_attest_with_expiry_happy_path() {
     let rcv: Receiving<Attestation<WithExpiry<TestSchema>>> =
         test_scenario::receiving_ticket_by_id(ids[0]);
 
-    attestation_registry::with_attestation!<WithExpiry<TestSchema>>(
-        &mut box,
-        rcv,
-        |a| {
-            assert!(a.subject() == subject, 0);
-            assert!(a.data().inner().tag == 9, 1);
-            assert!(a.is_effective(), 2);
-        },
-    );
+    let (a, b) = attestation_registry::borrow<WithExpiry<TestSchema>>(&mut box, rcv);
+    assert!(a.subject() == subject, 0);
+    assert!(a.data().inner().tag == 9, 1);
+    assert!(a.is_effective(), 2);
+    attestation_registry::put_back(&mut box, a, b);
     test_scenario::return_shared(box);
     scenario.end();
 }
@@ -90,11 +86,9 @@ fun test_is_in_effect_active_unexpired() {
         test_scenario::receiving_ticket_by_id(ids[0]);
     let mut clock = clock::create_for_testing(scenario.ctx());
     clock.set_for_testing(1000);
-    attestation_registry::with_attestation!<WithExpiry<TestSchema>>(
-        &mut box,
-        rcv,
-        |a| { assert!(with_expiry::is_in_effect(a, &clock), 0); },
-    );
+    let (a, b) = attestation_registry::borrow<WithExpiry<TestSchema>>(&mut box, rcv);
+    assert!(with_expiry::is_in_effect(&a, &clock), 0);
+    attestation_registry::put_back(&mut box, a, b);
     clock::destroy_for_testing(clock);
     test_scenario::return_shared(box);
     scenario.end();
@@ -125,11 +119,9 @@ fun test_is_in_effect_active_expired() {
         test_scenario::receiving_ticket_by_id(ids[0]);
     let mut clock = clock::create_for_testing(scenario.ctx());
     clock.set_for_testing(2500);
-    attestation_registry::with_attestation!<WithExpiry<TestSchema>>(
-        &mut box,
-        rcv,
-        |a| { assert!(!with_expiry::is_in_effect(a, &clock), 0); },
-    );
+    let (a, b) = attestation_registry::borrow<WithExpiry<TestSchema>>(&mut box, rcv);
+    assert!(!with_expiry::is_in_effect(&a, &clock), 0);
+    attestation_registry::put_back(&mut box, a, b);
     clock::destroy_for_testing(clock);
     test_scenario::return_shared(box);
     scenario.end();
@@ -161,7 +153,8 @@ fun test_is_in_effect_revoked() {
     let rcv: Receiving<Attestation<WithExpiry<TestSchema>>> =
         test_scenario::receiving_ticket_by_id(id);
     let cap = scenario.take_from_sender();
-    attestation_registry::revoke<WithExpiry<TestSchema>>(&mut box, cap, rcv, scenario.ctx());
+    let (a, b) = attestation_registry::borrow<WithExpiry<TestSchema>>(&mut box, rcv);
+    attestation_registry::revoke<WithExpiry<TestSchema>>(&mut box, a, cap, b, scenario.ctx());
     test_scenario::return_shared(box);
 
     // is_in_effect → false even though clock is before expiration.
@@ -171,11 +164,9 @@ fun test_is_in_effect_revoked() {
         test_scenario::receiving_ticket_by_id(id);
     let mut clock = clock::create_for_testing(scenario.ctx());
     clock.set_for_testing(500);
-    attestation_registry::with_attestation!<WithExpiry<TestSchema>>(
-        &mut box,
-        rcv,
-        |a| { assert!(!with_expiry::is_in_effect(a, &clock), 0); },
-    );
+    let (a, b) = attestation_registry::borrow<WithExpiry<TestSchema>>(&mut box, rcv);
+    assert!(!with_expiry::is_in_effect(&a, &clock), 0);
+    attestation_registry::put_back(&mut box, a, b);
     clock::destroy_for_testing(clock);
     test_scenario::return_shared(box);
     scenario.end();
