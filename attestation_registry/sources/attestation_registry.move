@@ -113,6 +113,8 @@ public struct Revoked has copy, drop {
     revoker: address,
 }
 
+// === Setup ===
+
 /// Create the `Registry` singleton at publish time.
 fun init(ctx: &mut TxContext) {
     transfer::share_object(Registry { id: object::new(ctx) });
@@ -125,6 +127,36 @@ public fun create_box(registry: &mut Registry, subject: ID) {
     let id = derived_object::claim(&mut registry.id, subject);
     transfer::share_object(Box { id, subject });
 }
+
+// === Accessors ===
+
+/// The subject this attestation is about.
+public fun subject<T: store>(self: &Attestation<T>): ID { self.subject }
+
+/// The typed payload.
+public fun data<T: store>(self: &Attestation<T>): &T { &self.data }
+
+/// `true` iff `self` has not been revoked. Schemas that need expiration
+/// chain this with their own time-based check (e.g.
+/// `with_expiry::is_in_effect`).
+public fun is_effective<T: store>(self: &Attestation<T>): bool {
+    match (&self.status) {
+        Status::Active => true,
+        Status::Revoked => false,
+    }
+}
+
+/// Original-publish address of `T`'s defining package — the same value
+/// recorded as `attester` in `Attested` events for `Attestation<T>`. Useful
+/// for on-chain trust-list checks (e.g.
+/// `assert!(trust_list.contains(attester_of<Audit>()))`).
+public fun attester_of<T>(): address {
+    let t = type_name::with_original_ids<T>();
+    let s = t.address_string();
+    address::from_ascii_bytes(s.as_bytes())
+}
+
+// === Attest / Revoke ===
 
 /// Attest about `box.subject` with `data`. Returns a `RevocationCap<T>` that
 /// can later be used to revoke this attestation. The `Permit<T>` proves the
@@ -153,6 +185,37 @@ public fun attest<T: store>(
     transfer::transfer(attestation, box.id.to_address());
     RevocationCap<T> { id: object::new(ctx), attestation_id }
 }
+
+/// Discharge an `AttestationBorrow` by revoking the attestation. Consumes
+/// the matching `RevocationCap<T>`. Aborts `EBorrowMismatch` if the box or
+/// attestation doesn't match the hot potato; aborts `ERevokeMismatch` if
+/// the cap's recorded `attestation_id` doesn't match the attestation being
+/// revoked.
+public fun revoke<T: store>(
+    box: &mut Box,
+    attestation: Attestation<T>,
+    cap: RevocationCap<T>,
+    borrow: AttestationBorrow,
+    ctx: &TxContext,
+) {
+    let AttestationBorrow { box_addr, attestation_id } = borrow;
+    let RevocationCap { id: cap_uid, attestation_id: cap_id } = cap;
+    object::delete(cap_uid);
+    assert!(box.id.to_address() == box_addr, EBorrowMismatch);
+    assert!(object::id(&attestation) == attestation_id, EBorrowMismatch);
+    assert!(cap_id == attestation_id, ERevokeMismatch);
+    let mut a = attestation;
+    a.status = Status::Revoked;
+    event::emit(Revoked {
+        attestation_id,
+        subject: a.subject,
+        type_name: type_name::with_original_ids<T>().into_string(),
+        revoker: ctx.sender(),
+    });
+    transfer::transfer(a, box_addr);
+}
+
+// === Read-borrow lifecycle ===
 
 /// Receive an attestation out of its `Box` for on-chain inspection. Returns
 /// the `Attestation<T>` value along with a non-droppable `AttestationBorrow`
@@ -188,60 +251,7 @@ public fun put_back<T: store>(
     transfer::transfer(attestation, box_addr);
 }
 
-/// Discharge an `AttestationBorrow` by revoking the attestation. Consumes
-/// the matching `RevocationCap<T>`. Aborts `EBorrowMismatch` if the box or
-/// attestation doesn't match the hot potato; aborts `ERevokeMismatch` if
-/// the cap's recorded `attestation_id` doesn't match the attestation being
-/// revoked.
-public fun revoke<T: store>(
-    box: &mut Box,
-    attestation: Attestation<T>,
-    cap: RevocationCap<T>,
-    borrow: AttestationBorrow,
-    ctx: &TxContext,
-) {
-    let AttestationBorrow { box_addr, attestation_id } = borrow;
-    let RevocationCap { id: cap_uid, attestation_id: cap_id } = cap;
-    object::delete(cap_uid);
-    assert!(box.id.to_address() == box_addr, EBorrowMismatch);
-    assert!(object::id(&attestation) == attestation_id, EBorrowMismatch);
-    assert!(cap_id == attestation_id, ERevokeMismatch);
-    let mut a = attestation;
-    a.status = Status::Revoked;
-    event::emit(Revoked {
-        attestation_id,
-        subject: a.subject,
-        type_name: type_name::with_original_ids<T>().into_string(),
-        revoker: ctx.sender(),
-    });
-    transfer::transfer(a, box_addr);
-}
-
-/// The subject this attestation is about.
-public fun subject<T: store>(self: &Attestation<T>): ID { self.subject }
-
-/// The typed payload.
-public fun data<T: store>(self: &Attestation<T>): &T { &self.data }
-
-/// `true` iff `self` has not been revoked. Schemas that need expiration
-/// chain this with their own time-based check (e.g.
-/// `with_expiry::is_in_effect`).
-public fun is_effective<T: store>(self: &Attestation<T>): bool {
-    match (&self.status) {
-        Status::Active => true,
-        Status::Revoked => false,
-    }
-}
-
-/// Original-publish address of `T`'s defining package — the same value
-/// recorded as `attester` in `Attested` events for `Attestation<T>`. Useful
-/// for on-chain trust-list checks (e.g.
-/// `assert!(trust_list.contains(attester_of<Audit>()))`).
-public fun attester_of<T>(): address {
-    let t = type_name::with_original_ids<T>();
-    let s = t.address_string();
-    address::from_ascii_bytes(s.as_bytes())
-}
+// === Display ===
 
 /// Publish an immutable `Display<Attestation<T>>` via the system display
 /// registry. Authorized by `Permit<T>` (only `T`'s defining module can mint
@@ -275,6 +285,8 @@ public fun register_display<T: store>(
     // Burn the DisplayCap so the template is permanently immutable.
     transfer::public_transfer(cap, @0x0);
 }
+
+// === Test seam ===
 
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
