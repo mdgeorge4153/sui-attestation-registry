@@ -1,4 +1,4 @@
-import { Transaction, type TransactionArgument } from '@mysten/sui/transactions';
+import { Transaction, type TransactionObjectArgument } from '@mysten/sui/transactions';
 
 /**
  * Append `audit_example::audit::attest_audit(registry, subject, score)` to
@@ -13,7 +13,7 @@ export function attestAuditTx(
     subject: string;
     score: number;
   },
-): TransactionArgument {
+): TransactionObjectArgument {
   const [cap] = tx.moveCall({
     target: `${args.auditExamplePkg}::audit::attest_audit`,
     arguments: [

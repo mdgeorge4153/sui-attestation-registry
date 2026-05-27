@@ -4,3 +4,4 @@ export { boxAddress, createBoxTx } from './boxes.js';
 export { listAttestations, getAttestation, type AttestationInfo } from './queries.js';
 export { revokeTx } from './revoke.js';
 export { attestAuditTx, auditAttestationType } from './audit.js';
+export { isEffective, type ConventionsContext } from './conventions.js';
