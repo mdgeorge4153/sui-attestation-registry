@@ -1,27 +1,24 @@
 module attestation_registry::attestation_registry;
 
-use std::ascii;
 use std::internal::Permit;
 use std::string::String;
 use std::type_name;
-use sui::address;
 use sui::derived_object;
 use sui::display_registry::{Self, DisplayRegistry};
 use sui::event;
 use sui::transfer::Receiving;
 
-/// Aborts when `create_box` is called twice for the same subject.
-const EBoxAlreadyExists: u64 = 0;
+#[error(code = 0)]
+const EBoxAlreadyExists: vector<u8> =
+    b"A Box already exists for this subject";
 
-/// Aborts when an `AttestationBorrow` hot potato is discharged with the wrong
-/// `Box` or the wrong `Attestation` value (i.e. the hot potato was opened
-/// against a different box/attestation than the one being put back or revoked).
-/// Implementation-oriented; should not occur in well-formed usage.
-const EBorrowMismatch: u64 = 1;
+#[error(code = 1)]
+const EBoxDoesNotExist: vector<u8> =
+    b"No Box exists for this subject; call create_box first";
 
-/// Aborts when `revoke` is called with a `RevocationCap` whose
-/// `attestation_id` doesn't match the attestation being revoked.
-const ERevokeMismatch: u64 = 2;
+#[error(code = 2)]
+const ERevokeMismatch: vector<u8> =
+    b"RevocationCap doesn't match the attestation being revoked";
 
 /// Shared singleton, parent UID for every per-subject `Box`.
 public struct Registry has key {
@@ -40,35 +37,21 @@ public struct Box has key {
     subject: ID,
 }
 
-/// State of an `Attestation`. Expiration is intentionally not represented here
-/// — schemas that need expiry wrap their data in `with_expiry::WithExpiry<T>`.
-public enum Status has copy, drop, store {
-    Active,
-    Revoked,
-}
-
 /// Typed attestation about `subject`. Stored as an object owned-by-Box via
 /// transfer-to-object.
 ///
-/// **Lifecycle invariant**: `key`-only (no `store`). External callers who
-/// obtain an `Attestation<T>` by value (via `borrow`) cannot:
-/// (1) transfer it elsewhere — `transfer::public_transfer` requires
-///     `key + store`, and the private `transfer::transfer` is restricted to
-///     this module;
-/// (2) wrap it in another struct — struct fields can hold `key`-only types
-///     only if the enclosing struct doesn't itself need `store`, and Move
-///     forbids storing a `key` object inside another object;
-/// (3) drop it — no `drop` ability.
-/// The only ways to discharge an `Attestation<T>` by value are `put_back`
-/// or `revoke`, both of which re-anchor it at its owning Box. The hot
-/// potato `AttestationBorrow` reinforces this: it has no abilities, so it
-/// must also be passed to one of those discharge functions. Bytecode-
-/// enforced; no discipline note required.
+/// **Lifecycle invariant**: `key`-only (no `store`, no `drop`). External
+/// callers have no way to obtain an `Attestation<T>` by value (no public
+/// function returns one), and even if they did they couldn't transfer it
+/// (`public_transfer` requires `store`), wrap it in another struct (Move
+/// forbids storing `key` objects inside other objects), or drop it. The only
+/// disposition of an `Attestation<T>` is through this module's `revoke`,
+/// which receives it internally and re-transfers it to the owning Box.
 public struct Attestation<T: store> has key {
     id: UID,
     subject: ID,
     data: T,
-    status: Status,
+    active: bool,
 }
 
 /// Bearer-token authority to revoke a single `Attestation<T>`. Returned by
@@ -82,35 +65,16 @@ public struct RevocationCap<phantom T> has key, store {
     attestation_id: ID,
 }
 
-/// Hot potato handed out alongside an `Attestation<T>` by `borrow`. Has no
-/// abilities (no `drop`, `store`, `copy`, or `key`), so the borrow checker
-/// forces the caller to discharge it via `put_back` or `revoke` before the
-/// transaction ends. Carries the originating box's address and the
-/// attestation's id, both verified by the discharge functions to prevent
-/// the caller from swapping in a different value or a different box.
-public struct AttestationBorrow {
-    box_addr: address,
-    attestation_id: ID,
+/// Emitted by every `attest` call. Indexers filter by the phantom `T`
+/// (which becomes part of the event's fully-qualified Move type — RPC
+/// supports filtering by struct-type) and key by `subject`.
+public struct Attested<phantom T> has copy, drop {
+    subject: ID,
 }
 
-/// Emitted by every `attest` call. `attester` is resolved at mint time from
-/// the outermost type's original publish address; `type_name` lets indexers
-/// filter or group without reparsing.
-public struct Attested has copy, drop {
-    attestation_id: ID,
+/// Emitted by every `revoke` call. Same shape as `Attested` for symmetry.
+public struct Revoked<phantom T> has copy, drop {
     subject: ID,
-    attester: address,
-    type_name: ascii::String,
-}
-
-/// Emitted by every `revoke` call. `revoker` is `tx_context::sender()` at
-/// revoke time, which may differ from the original attester if the cap was
-/// transferred.
-public struct Revoked has copy, drop {
-    attestation_id: ID,
-    subject: ID,
-    type_name: ascii::String,
-    revoker: address,
 }
 
 // === Setup ===
@@ -136,119 +100,60 @@ public fun subject<T: store>(self: &Attestation<T>): ID { self.subject }
 /// The typed payload.
 public fun data<T: store>(self: &Attestation<T>): &T { &self.data }
 
-/// `true` iff `self` has not been revoked. Schemas that need expiration
-/// chain this with their own time-based check (e.g.
-/// `with_expiry::is_in_effect`).
-public fun is_effective<T: store>(self: &Attestation<T>): bool {
-    match (&self.status) {
-        Status::Active => true,
-        Status::Revoked => false,
-    }
-}
+/// `true` iff `self` has not been revoked. Time-based effectiveness (e.g.
+/// expiration) is expressed via Display conventions, not via this field —
+/// see CONVENTIONS.md.
+public fun is_active<T: store>(self: &Attestation<T>): bool { self.active }
 
-/// Original-publish address of `T`'s defining package — the same value
-/// recorded as `attester` in `Attested` events for `Attestation<T>`. Useful
-/// for on-chain trust-list checks (e.g.
+/// Original-publish address of `T`'s defining package. Useful for on-chain
+/// trust-list checks (e.g.
 /// `assert!(trust_list.contains(attester_of<Audit>()))`).
-public fun attester_of<T>(): address {
-    let t = type_name::with_original_ids<T>();
-    let s = t.address_string();
-    address::from_ascii_bytes(s.as_bytes())
-}
+public fun attester_of<T>(): address { type_name::original_id<T>() }
 
 // === Attest / Revoke ===
 
-/// Attest about `box.subject` with `data`. Returns a `RevocationCap<T>` that
-/// can later be used to revoke this attestation. The `Permit<T>` proves the
-/// call originated from `T`'s defining package; that package's original
-/// publish address is recorded as the attester (in the emitted `Attested`
-/// event — not in the struct).
+/// Attest about `subject` (under `registry`) with `data`. Requires a
+/// `Permit<T>` proving the call originated from `T`'s defining package.
+/// Aborts `EBoxDoesNotExist` if no Box exists for this subject (call
+/// `create_box` first). Returns a `RevocationCap<T>` that can later be used
+/// to revoke this attestation.
 public fun attest<T: store>(
-    _: Permit<T>,
-    box: &mut Box,
+    registry: &Registry,
+    subject: ID,
     data: T,
+    _: Permit<T>,
     ctx: &mut TxContext,
 ): RevocationCap<T> {
+    assert!(derived_object::exists(&registry.id, subject), EBoxDoesNotExist);
+    let box_addr = derived_object::derive_address(object::id(registry), subject);
     let attestation = Attestation<T> {
         id: object::new(ctx),
-        subject: box.subject,
+        subject,
         data,
-        status: Status::Active,
+        active: true,
     };
     let attestation_id = object::id(&attestation);
-    event::emit(Attested {
-        attestation_id,
-        subject: box.subject,
-        attester: attester_of<T>(),
-        type_name: type_name::with_original_ids<T>().into_string(),
-    });
-    transfer::transfer(attestation, box.id.to_address());
+    event::emit(Attested<T> { subject });
+    transfer::transfer(attestation, box_addr);
     RevocationCap<T> { id: object::new(ctx), attestation_id }
 }
 
-/// Discharge an `AttestationBorrow` by revoking the attestation. Consumes
-/// the matching `RevocationCap<T>`. Aborts `EBorrowMismatch` if the box or
-/// attestation doesn't match the hot potato; aborts `ERevokeMismatch` if
-/// the cap's recorded `attestation_id` doesn't match the attestation being
-/// revoked.
+/// Revoke the attestation referenced by `rcv`. Aborts `ERevokeMismatch` if
+/// the receiving ticket and the `RevocationCap` reference different
+/// attestations.
 public fun revoke<T: store>(
     box: &mut Box,
-    attestation: Attestation<T>,
     cap: RevocationCap<T>,
-    borrow: AttestationBorrow,
-    ctx: &TxContext,
+    rcv: Receiving<Attestation<T>>,
+    _ctx: &TxContext,
 ) {
-    let AttestationBorrow { box_addr, attestation_id } = borrow;
     let RevocationCap { id: cap_uid, attestation_id: cap_id } = cap;
     object::delete(cap_uid);
-    assert!(box.id.to_address() == box_addr, EBorrowMismatch);
-    assert!(object::id(&attestation) == attestation_id, EBorrowMismatch);
-    assert!(cap_id == attestation_id, ERevokeMismatch);
-    let mut a = attestation;
-    a.status = Status::Revoked;
-    event::emit(Revoked {
-        attestation_id,
-        subject: a.subject,
-        type_name: type_name::with_original_ids<T>().into_string(),
-        revoker: ctx.sender(),
-    });
-    transfer::transfer(a, box_addr);
-}
-
-// === Read-borrow lifecycle ===
-
-/// Receive an attestation out of its `Box` for on-chain inspection. Returns
-/// the `Attestation<T>` value along with a non-droppable `AttestationBorrow`
-/// hot potato that *must* be discharged before the transaction ends —
-/// either by `put_back` (leaving the attestation unchanged) or `revoke`
-/// (transitioning it to `Revoked`). Bytecode-enforced; the type system
-/// forbids any other disposition.
-public fun borrow<T: store>(
-    box: &mut Box,
-    rcv: Receiving<Attestation<T>>,
-): (Attestation<T>, AttestationBorrow) {
-    let a = transfer::receive(&mut box.id, rcv);
-    let attestation_id = object::id(&a);
-    let borrow = AttestationBorrow {
-        box_addr: box.id.to_address(),
-        attestation_id,
-    };
-    (a, borrow)
-}
-
-/// Discharge an `AttestationBorrow` without changes: re-anchor the
-/// attestation at its originating Box. Aborts `EBorrowMismatch` if the
-/// caller supplies a different box or a different attestation than the one
-/// recorded in the hot potato.
-public fun put_back<T: store>(
-    box: &mut Box,
-    attestation: Attestation<T>,
-    borrow: AttestationBorrow,
-) {
-    let AttestationBorrow { box_addr, attestation_id } = borrow;
-    assert!(box.id.to_address() == box_addr, EBorrowMismatch);
-    assert!(object::id(&attestation) == attestation_id, EBorrowMismatch);
-    transfer::transfer(attestation, box_addr);
+    assert!(transfer::receiving_object_id(&rcv) == cap_id, ERevokeMismatch);
+    let mut a = transfer::receive(&mut box.id, rcv);
+    a.active = false;
+    event::emit(Revoked<T> { subject: a.subject });
+    transfer::transfer(a, box.id.to_address());
 }
 
 // === Display ===
@@ -258,21 +163,21 @@ public fun put_back<T: store>(
 /// it); one-per-T enforcement is provided by `display_registry`.
 ///
 /// Template strings in `values` reference fields of `Attestation<T>`:
-/// - Top-level: `{subject}`, `{data}`, `{status}`
+/// - Top-level: `{subject}`, `{data}`, `{active}`
 /// - T's own fields are under `{data.<field>}` (e.g. `{data.score}`)
 ///
-/// One field is appended automatically: `status` rendering the variant.
-/// Schemas that wrap with `WithExpiry<T>` and want an `expires_at` row
-/// include it themselves in `fields` / `values`.
+/// One field is appended automatically: `active` rendering `true`/`false`.
+/// Schemas adopting cross-cutting conventions (`expires_at`, `requires`,
+/// etc. — see CONVENTIONS.md) include those fields themselves.
 public fun register_display<T: store>(
-    _: Permit<T>,
     display_registry: &mut DisplayRegistry,
     mut fields: vector<String>,
     mut values: vector<String>,
+    _: Permit<T>,
     ctx: &mut TxContext,
 ) {
-    fields.push_back(b"status".to_string());
-    values.push_back(b"{status}".to_string());
+    fields.push_back(b"active".to_string());
+    values.push_back(b"{active}".to_string());
 
     let (mut display, cap) = display_registry::new<Attestation<T>>(
         display_registry,
@@ -291,4 +196,21 @@ public fun register_display<T: store>(
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     init(ctx);
+}
+
+/// Test-only mirror of the `borrow`/`put_back` pattern documented in
+/// docs/future-extensions.md. Production callers can't reach this, so the
+/// hot-potato discipline isn't required here — tests just receive,
+/// inspect, and put back manually.
+#[test_only]
+public fun borrow_for_testing<T: store>(
+    box: &mut Box,
+    rcv: Receiving<Attestation<T>>,
+): Attestation<T> {
+    transfer::receive(&mut box.id, rcv)
+}
+
+#[test_only]
+public fun put_back_for_testing<T: store>(box: &mut Box, a: Attestation<T>) {
+    transfer::transfer(a, box.id.to_address());
 }

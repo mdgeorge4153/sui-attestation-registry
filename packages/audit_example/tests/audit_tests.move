@@ -11,9 +11,8 @@ const ALICE: address = @0xA11CE;
 fun subject_for(addr: address): ID { addr.to_id() }
 
 /// Verifies the cross-package attest flow: `audit_example::attest_audit`
-/// produces an attestation accessible via `borrow`/`put_back`, and the
-/// attester resolution (`attester_of<Audit>`) returns audit_example's
-/// package address — distinct from `attestation_registry`'s.
+/// produces an accessible attestation, and `attester_of<Audit>` returns
+/// audit_example's package address — distinct from `attestation_registry`'s.
 #[test]
 fun test_attest_audit_cross_package() {
     let subject = subject_for(@0xDEAD);
@@ -26,10 +25,10 @@ fun test_attest_audit_cross_package() {
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
-    let cap = audit::attest_audit(&mut box, 9, scenario.ctx());
+    let registry: Registry = scenario.take_shared();
+    let cap = audit::attest_audit(&registry, subject, 9, scenario.ctx());
     transfer::public_transfer(cap, ALICE);
-    test_scenario::return_shared(box);
+    test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
     let mut box: Box = scenario.take_shared();
@@ -38,14 +37,14 @@ fun test_attest_audit_cross_package() {
     );
     let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(ids[0]);
 
-    let (a, b) = attestation_registry::borrow<Audit>(&mut box, rcv);
+    let a = attestation_registry::borrow_for_testing<Audit>(&mut box, rcv);
     assert!(a.subject() == subject, 0);
     assert!(a.data().score() == 9, 1);
-    assert!(a.is_effective(), 2);
-    attestation_registry::put_back(&mut box, a, b);
+    assert!(a.is_active(), 2);
+    attestation_registry::put_back_for_testing(&mut box, a);
 
     // attester_of<Audit> must resolve to audit_example's package address,
-    // not attestation_registry's. We compare against attester_of for a type
+    // not attestation_registry's. Compare against attester_of for a type
     // defined in attestation_registry: they must differ.
     let audit_pkg = attestation_registry::attester_of<Audit>();
     let registry_pkg = attestation_registry::attester_of<Registry>();
