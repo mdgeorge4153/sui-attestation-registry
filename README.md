@@ -63,14 +63,23 @@ and re-lists to show the `active=false` transition.
 
 Prerequisites:
 
-1. Publish all three packages to testnet:
+1. Test-publish all three packages to testnet, sharing one ephemeral
+   pubfile across them so each resolves dependencies against the others'
+   just-published addresses. `test-publish`'s default pubfile location is
+   the package directory, so pass `--pubfile-path` explicitly to point at
+   the same file at the repo root (where `ts/demo.ts` looks for it):
    ```bash
-   cd packages/attestation_registry && sui client publish
-   cd packages/audit_example        && sui client publish
-   cd packages/vuln_example         && sui client publish
+   PUBFILE="$PWD/Pub.testnet.toml"
+   (cd packages/attestation_registry && sui client test-publish --pubfile-path "$PUBFILE")
+   (cd packages/audit_example        && sui client test-publish --pubfile-path "$PUBFILE")
+   (cd packages/vuln_example         && sui client test-publish --pubfile-path "$PUBFILE")
    ```
-   Each publish updates `Pub.testnet.toml` at the repo root with the
-   resulting addresses.
+   `Pub.testnet.toml` is gitignored — it's ephemeral and per-user.
+   (`sui client publish` would instead write `Published.toml` for a
+   permanent, checked-in deployment; the PoC defaults to ephemeral.)
+   Alternatively, `sui client test-publish --publish-unpublished-deps
+   --pubfile-path "$PUBFILE"` on, say, `audit_example` deploys it and its
+   unpublished dependencies in one shot.
 
 2. Note the `Registry` object's ID from the first publish's output (a shared
    object of type `…::attestation_registry::Registry`). Export it:
