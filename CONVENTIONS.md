@@ -13,6 +13,14 @@ zero, one, or many of these by including the corresponding fields in its
 (`WithExpiry<WithRequires<Audit<OtterSec>>>`) — the schema just lists the
 fields it surfaces, and conventions stack naturally.
 
+## Base effectiveness
+
+All convention-based effectiveness rules below are **conjunctive with the
+registry's own revocation state**: an attestation is never effective when its
+on-chain `active` field is `false`. The conventions below add further
+conditions on top of that base; revocation alone is sufficient to make an
+attestation ineffective regardless of how its convention fields render.
+
 ## Conventions
 
 ### `expires_at`
