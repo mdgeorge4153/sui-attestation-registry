@@ -3,3 +3,5 @@ Pub.*.toml
 build/
 NOTES.md
 
+ts/node_modules/
+ts/dist/
