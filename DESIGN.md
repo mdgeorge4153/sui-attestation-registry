@@ -1,0 +1,260 @@
+# Design and Rationale
+
+This document records *why* the on-chain design is shaped the way it is.
+For *how to use it*, see `README.md`. For ideas we considered and deferred,
+see `FUTURE-EXTENSIONS.md`. For the comparison with SIP-56, see
+`SIP-56-COMPARISON.md`. For schema-level Display conventions, see
+`CONVENTIONS.md`.
+
+## Design pillars
+
+- **Off-chain primary.** The dominant access pattern is off-chain
+  consumers (wallets, indexers, the TS library) reading attestations
+  about a subject. Every on-chain choice was evaluated against "does
+  this make the off-chain read story better, the same, or worse?"
+- **Minimal core, conventions for the rest.** The registry's Move
+  surface is small: a Registry, per-subject Boxes, typed Attestations,
+  and bearer RevocationCaps. Anything cross-cutting (expiration,
+  dependency relationships, etc.) is a Display-field convention
+  evaluated off-chain, not a Move type or registry-level concern.
+- **Bytecode-verifiable identity.** The recorded attester for an
+  `Attestation<T>` resolves to `T`'s defining package's *original*
+  publish address. Trust signals are anchored to the package that
+  defined the type, not to the keypair that signed the transaction.
+
+## Storage: per-subject `Box`, transfer-to-object
+
+```
+Registry (shared singleton)
+  └── derived_object → Box (one per subject)
+                       └── owns Attestation<T> via TTO
+```
+
+- **`Registry`** is a `key`-only shared singleton, created in `init`.
+  Its UID is the parent for all per-subject boxes.
+- **`Box`** is `key`-only and per-subject. Its address is
+  `derived_object::derive_address(registry, subject)` — *computable
+  off-chain* from `(registry_id, subject_id)`. Off-chain consumers
+  fetch every attestation about a subject from this single address
+  via `getOwnedObjects(box_addr, filter={StructType: ...})`, with
+  native server-side type filtering.
+- **`Attestation<T: store>`** is `key`-only, owned by the Box via
+  `transfer::transfer(attestation, box.id.to_address())`.
+
+### Why TTO, not DOF
+
+The DOF-keyed-by-attestation-id design was considered (and built — see
+`mdgeorge/box-dof-reference` branch for a reference snapshot). The
+deciding factor: with DOF, listing "all `Attestation<Audit>` on subject
+S" requires a client-side filter pass over all of S's dynamic fields
+because DOF queries don't support server-side type filtering. TTO does:
+`getOwnedObjects(box_addr, filter={StructType: ...})` is a native RPC.
+
+DOF gives slightly better on-chain ergonomics (immutable borrow needs
+only `&Box`, parallelizable reads). TTO requires `&mut Box` for every
+read because `transfer::receive` needs `&mut UID`. We accept the on-chain
+cost because the read story is the dominant use case and TTO is materially
+better there. See `FUTURE-EXTENSIONS.md` for the on-chain inspection
+patterns we deferred.
+
+### Why a Box at all (not transferring directly to the derived address)
+
+The Box object exists for two reasons:
+
+- It carries a `subject: ID` field, so a viewer who inspects the Box
+  directly knows what it's about without separately knowing the
+  `(registry, subject)` pair that derived its address.
+- `transfer::receive` requires a `&mut UID` for the parent. Without an
+  actual object at the derived address, there's no UID to borrow; you
+  couldn't revoke (or do anything else that needs to take an attestation
+  back).
+
+`create_box(registry, subject)` is an explicit per-subject setup step.
+Aborts `EBoxAlreadyExists` on second call for the same subject.
+
+## `Attestation<T>` lifecycle invariant
+
+```move
+public struct Attestation<T: store> has key {
+    id: UID,
+    subject: ID,
+    data: T,
+    active: bool,
+}
+```
+
+`Attestation<T>` is **`key`-only**: no `store`, no `drop`, no `copy`. External
+callers have no way to obtain one by value (no public function returns one),
+and even if they did:
+
+- `transfer::public_transfer` requires `key + store`. Without `store`, no
+  way to move it.
+- Move forbids wrapping a `key` object inside another struct.
+- No `drop` means they can't discard it.
+
+The only legal disposition of an `Attestation<T>` is through this module's
+`revoke`, which receives it internally, flips `active`, and re-transfers it
+to the owning Box. Bytecode-enforced; no discipline note required.
+
+## `active: bool`, not a `Status` enum
+
+We tried `enum Status { Active, ActiveUntil { expires_at_ms }, Revoked }`
+during the iteration that put expiration on-chain. After moving expiration
+to a Display convention (see "Display-mixin conventions" below), there's
+only one bit of on-chain state to track: revoked or not. A bool is the
+right shape; the enum was carrying complexity that didn't pay for itself.
+
+## Attester identity: from `T`'s package, not the signer
+
+The attester recorded on `Attested<T>` events is resolved at mint time via
+`type_name::original_id<T>()` — the original publish address of `T`'s
+defining package.
+
+This is bytecode-verifiable: the existence of an `Attestation<T>` on-chain
+proves that `T`'s defining package's code path was taken to mint it,
+because constructing a `T` value is restricted to that package by Move's
+struct construction rules. No separate `Permit<T>` is needed: producing a
+`T` *is* the proof.
+
+Consequences:
+
+- Trust lists are keyed by package address. "I trust this auditor" is
+  expressed at the granularity of "I trust attestations from this
+  package."
+- New attestation types added in package upgrades automatically inherit
+  the same attester identity. Upgrade authority is attestation-dynamics
+  authority anyway, so this composes correctly at the security level.
+- Permissionless attestation is an opt-in schema-level choice: a schema
+  exposes a public constructor and (typically) includes
+  `sender: address` in its data. The recorded attester (at the type
+  level) is still the schema package; the per-attestation signer lives
+  in the data.
+
+`attest` is *not* gated by `Permit<T>` — Move's construction rule does
+the same job. `register_display` *is* gated by `Permit<T>` because
+Display authority isn't the same as data-construction authority (without
+the permit, anyone could race to register `Display<Attestation<T>>` for
+any T).
+
+## Revocation: bearer `RevocationCap<T>`
+
+```move
+public struct RevocationCap<phantom T> has key, store {
+    id: UID,
+    attestation_id: ID,
+}
+```
+
+`attest<T>` returns a `RevocationCap<T>`. Holding the cap *is* the
+authorization to revoke; there's no separate sender check.
+
+- To commit irrevocably: `transfer::public_transfer(cap, @0x0)` (or hand
+  it to a multisig-controlled address).
+- To delegate: transfer the cap.
+- `revoke(box, cap, rcv, ctx)` consumes the cap, receives the
+  attestation via `transfer::receive`, flips `active` to false,
+  re-transfers it back to the box. Aborts `ERevokeMismatch` if the cap
+  and receiving ticket don't reference the same attestation.
+
+## Display registration and the freeze-the-wrapper pattern
+
+```move
+public struct DisplayLock<T: store> has key {
+    id: UID,
+    cap: display_registry::DisplayCap<Attestation<T>>,
+}
+```
+
+`register_display<T>(...)` creates the Display, applies the fields the
+schema passed in (plus an auto-appended `active` field), shares the
+Display, then **freezes a `DisplayLock<T>`** containing the `DisplayCap`.
+
+The DisplayCap is the cap that authorizes `set`/`unset`/`clear` on the
+Display, so locking it makes the Display content permanently immutable.
+The `cap` field is module-private; freezing the wrapper makes it
+immovable; together that's equivalent to destroying the cap (which the
+framework doesn't expose a way to do directly).
+
+This is the same freeze-a-wrapper pattern SIP-56's PR-evolved design
+uses (`AttestationType<T>` wraps `DisplayCap` and freezes). The
+mechanisms are the same; we just don't reuse the wrapper for further
+authorization.
+
+## Events: phantom T, minimal payload
+
+```move
+public struct Attested<phantom T> has copy, drop { subject: ID }
+public struct Revoked<phantom T> has copy, drop { subject: ID }
+```
+
+- `phantom T` makes the event's fully-qualified Move type the
+  filterable surface. RPC subscribers filter by
+  `eventType: "0xPKG::attestation_registry::Attested<0xAUD::audit::Audit>"`
+  directly; no string parsing.
+- `subject` is the only field, because nothing else is information that
+  isn't already recoverable from `tx.effects` or from the attestation
+  object itself. Denormalizing (attester, attestation_id, revoker, etc.)
+  on events creates two-sources-of-truth hazards without saving any
+  query work for indexers that ingest events.
+
+## Display-mixin conventions
+
+Cross-cutting behaviors like expiration (`expires_at`) and dependency
+relationships (`requires`) are expressed as Display field conventions,
+evaluated off-chain by `ts/lib/conventions.ts` and any consumer that
+adopts them. See `CONVENTIONS.md`.
+
+Rationale: these behaviors don't need on-chain enforcement for trust
+signals (the registry is off-chain primary), and putting them on-chain
+as Move types created composability problems (`WithExpiry<Audit<OtterSec>>`
+is awkward to nest; the attester resolution rule got confused by
+wrappers). Display fields stack naturally — a schema adopting both
+`expires_at` and `requires` just includes both fields in its
+`register_display` call.
+
+## Schema-level patterns
+
+The registry is intentionally minimal; schemas express choices about
+their attestation semantics in the schema package, not via registry
+flags:
+
+- **Revocable vs. permanent**: schemas decide whether to hand the cap
+  to the caller (revocable) or burn it to `@0x0` inside their own
+  attest wrapper (permanent).
+- **Permissioned vs. permissionless**: schemas decide whether to expose
+  a public constructor for their data type. Private constructor =
+  permissioned (only the schema package can attest). Public constructor
+  + `sender: address` field on the data = permissionless with per-
+  attestation signer captured in the data.
+- **Expiration / dependencies**: opt into the `expires_at` and
+  `requires` Display conventions by including the corresponding
+  template entries in `register_display`. Off-chain consumers apply
+  the semantics; the registry doesn't know or care.
+
+## What this design deliberately doesn't have
+
+- **On-chain type registry** (analogue of SIP-56's `register_type`).
+  Type discoverability is an off-chain concern (enumerate events,
+  filter by struct-type via RPC).
+- **Pinning by package publisher**. Curation of trust signals is a
+  consumer concern; package authors are the wrong principal to control
+  what trust signals get surfaced. See `SIP-56-COMPARISON.md` for the
+  longer argument.
+- **On-chain inspection of attestation data** as a public API. The
+  `borrow`/`put_back` hot-potato pattern and the `T: copy` read-by-copy
+  pattern were both worked through and deliberately deferred to
+  `FUTURE-EXTENSIONS.md` until a concrete consumer materializes.
+- **Sender-keyed authorization**. Revocation authority is the cap, not
+  `tx.sender()`.
+- **Attestation `store` ability**. `Attestation<T>` is `key`-only;
+  external callers can't wrap, transfer, or drop it.
+
+## Related documents
+
+- `README.md` — quickstart, repo layout, how to run the demo.
+- `CONVENTIONS.md` — schema-level Display conventions (`expires_at`,
+  `requires`, …) and their semantics.
+- `FUTURE-EXTENSIONS.md` — design memos for surfaces deferred from v0
+  (on-chain inspection patterns).
+- `SIP-56-COMPARISON.md` — point-by-point comparison with SIP-56 and
+  why each remaining divergence is an improvement.
