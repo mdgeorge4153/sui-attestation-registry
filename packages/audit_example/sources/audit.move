@@ -23,7 +23,7 @@ public fun register_audit_display(
         vector[name_field(), description_field()],
         vector[
             b"Audit attestation".to_string(),
-            b"Score: {data.score}/10".to_string(),
+            b"Score: {data.score}/100".to_string(),
         ],
         std::internal::permit<Audit>(),
         ctx,
