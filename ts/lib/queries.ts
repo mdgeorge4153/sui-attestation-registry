@@ -16,6 +16,16 @@ export interface AttestationInfo {
 }
 
 /**
+ * Normalize the gRPC Display v2 payload to the flat field map that
+ * `AttestationInfo.display` exposes. The client returns it wrapped as
+ * `{ output: { ...fields }, errors }`; we surface just the fields.
+ */
+function displayFields(d: unknown): Record<string, unknown> {
+  const out = (d as { output?: unknown } | null)?.output;
+  return (out ?? d) as Record<string, unknown>;
+}
+
+/**
  * List every attestation owned by `boxAddr`. Pass `typeFilter` to use gRPC's
  * native server-side `StructType` filter — strictly cheaper than fetching all
  * and filtering client-side.
@@ -54,7 +64,7 @@ export async function listAttestations(
         digest: obj.digest,
         type: obj.type,
         ...(obj.content !== undefined && { content: obj.content as Uint8Array }),
-        ...(obj.display != null && { display: obj.display as Record<string, unknown> }),
+        ...(obj.display != null && { display: displayFields(obj.display) }),
       });
     }
     cursor = page.hasNextPage ? page.cursor : null;
@@ -83,6 +93,6 @@ export async function getAttestation(
     digest: object.digest,
     type: object.type,
     ...(object.content !== undefined && { content: object.content as Uint8Array }),
-    ...(object.display != null && { display: object.display as Record<string, unknown> }),
+    ...(object.display != null && { display: displayFields(object.display) }),
   };
 }

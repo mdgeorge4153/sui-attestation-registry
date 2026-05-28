@@ -1,0 +1,78 @@
+/// V2 audit schema, introduced in a package *upgrade* of audit_example.
+///
+/// This module lives outside `sources/` so it is absent from the initial
+/// publish. The publish script copies it into `sources/` only for the
+/// upgrade step (see `scripts/test-publish.sh`). As a result `AuditV2`'s
+/// defining (origin) package id is the *upgraded* package id — distinct from
+/// audit_example's original publish id — while `attester_of<AuditV2>()` still
+/// resolves to the original id. That mismatch is exactly the schema-evolution
+/// case the trusted-attestor matching must handle: trusting audit_example's
+/// original id should surface `Attestation<AuditV2>` too.
+module audit_example::audit_v2;
+
+use std::string::String;
+use sui::display_registry::DisplayRegistry;
+use attestation_registry::attestation_registry::{Self, Registry, RevocationCap};
+
+/// V2 audit payload: adds a report link and a `requires` dependency list.
+public struct AuditV2 has store, drop {
+    score: u8,
+    /// URL of the full audit report (surfaced via the `link` convention).
+    report_url: String,
+    /// Attestation ids this audit is conditional on (the `requires`
+    /// convention): if any required attestation becomes ineffective
+    /// (revoked/expired), this audit is considered ineffective too.
+    requires: vector<ID>,
+}
+
+/// One-shot setup: register the immutable `Display<Attestation<AuditV2>>`,
+/// including the `link` and `requires` convention fields.
+public fun register_audit_v2_display(
+    display_registry: &mut DisplayRegistry,
+    ctx: &mut TxContext,
+) {
+    attestation_registry::register_display<AuditV2>(
+        display_registry,
+        vector[
+            b"name".to_string(),
+            b"description".to_string(),
+            b"link".to_string(),
+            b"requires".to_string(),
+        ],
+        vector[
+            b"Audit attestation (v2)".to_string(),
+            b"Score: {data.score}/100".to_string(),
+            b"{data.report_url}".to_string(),
+            b"{data.requires:json}".to_string(),
+        ],
+        std::internal::permit<AuditV2>(),
+        ctx,
+    );
+}
+
+/// Issue an AuditV2 attestation about `subject`, conditional on `requires`.
+/// Returns the revocation cap.
+public fun attest_audit_v2(
+    registry: &Registry,
+    subject: ID,
+    score: u8,
+    report_url: String,
+    requires: vector<ID>,
+    ctx: &mut TxContext,
+): RevocationCap<AuditV2> {
+    attestation_registry::attest<AuditV2>(
+        registry,
+        subject,
+        AuditV2 { score, report_url, requires },
+        ctx,
+    )
+}
+
+/// The numeric audit score.
+public fun score(self: &AuditV2): u8 { self.score }
+
+/// The audit report URL.
+public fun report_url(self: &AuditV2): &String { &self.report_url }
+
+/// The attestation ids this audit is conditional on.
+public fun requires(self: &AuditV2): &vector<ID> { &self.requires }

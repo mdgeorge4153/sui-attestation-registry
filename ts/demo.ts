@@ -1,36 +1,39 @@
 /**
- * End-to-end CLI demo against testnet:
- *   - create a Box for a fresh subject
- *   - issue one audit attestation (to be revoked), then one audit (active),
- *     then one vulnerability attestation
- *   - list and pretty-print the attestations with their Display rendering
- *   - revoke the first audit attestation
- *   - re-list to show the active=false transition
+ * End-to-end CLI demo against a localnet (or any RPC):
+ *   - create Boxes for two real published subjects: `dependency_example` and
+ *     `subject_example` (which depends on it)
+ *   - audit the dependency (Attestation<Audit>, v1 schema)
+ *   - audit the subject with AuditV2 (the upgrade-added schema) that `requires`
+ *     the dependency's audit, plus a Vulnerability attestation
+ *   - list + pretty-print the attestations with their Display rendering
+ *   - evaluate the subject audit's *effectiveness* (transitive `requires`)
+ *   - revoke the dependency's audit, and show the subject audit flip to
+ *     ineffective
+ *   - write `demo-ids.json` (registry id, subjects, trusted attesters) for the
+ *     MVR Postgres seeder
  *
  * Run with:
- *   REGISTRY_ID=0x... pnpm demo [--rpc <url>] [--subject <hex-id>] [--pubfile <path>]
+ *   REGISTRY_ID=0x... pnpm demo [--rpc <url>] [--pubfile <path>]
  *
  * Defaults:
  *   - --rpc      http://127.0.0.1:9000 (a `sui start --with-faucet` localnet)
  *   - --pubfile  Pub.localnet.toml at the repo root
  *
  * Requires:
- *   - All three packages test-published with `scripts/test-publish.sh`, which
- *     writes the pubfile and prints the REGISTRY_ID line you should export.
+ *   - All packages test-published + audit_example upgraded via
+ *     `scripts/test-publish.sh`, which writes the pubfile and prints REGISTRY_ID.
  *   - The sui CLI's keystore at `~/.sui/sui_config/sui.keystore`, with the
  *     active address funded on the target network.
  */
 
-import { readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { randomBytes } from 'node:crypto';
 
 import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { fromBase64, normalizeSuiAddress, toHex } from '@mysten/sui/utils';
-import type { SuiClientTypes } from '@mysten/sui/client';
+import { fromBase64, normalizeSuiAddress } from '@mysten/sui/utils';
 
 import {
   makeClient,
@@ -38,15 +41,20 @@ import {
   boxAddress,
   createBoxTx,
   attestAuditTx,
+  attestAuditV2Tx,
   auditAttestationType,
+  auditV2AttestationType,
   revokeTx,
   listAttestations,
+  getAttestation,
+  isEffective,
   type AttestationInfo,
   type PublishedPackages,
 } from './lib/index.js';
 
 const KEYSTORE_PATH = join(homedir(), '.sui', 'sui_config', 'sui.keystore');
 const DEFAULT_PUBFILE_PATH = join(import.meta.dirname, '..', 'Pub.localnet.toml');
+const DEMO_IDS_PATH = join(import.meta.dirname, '..', 'demo-ids.json');
 const DEFAULT_RPC = 'http://127.0.0.1:9000';
 
 function loadKeypair(): Ed25519Keypair {
@@ -64,10 +72,6 @@ function loadKeypair(): Ed25519Keypair {
     throw new Error(`first keystore entry isn't Ed25519 (flag=${decoded[0]}); demo doesn't support others`);
   }
   return Ed25519Keypair.fromSecretKey(decoded.slice(1));
-}
-
-function randomSubject(): string {
-  return normalizeSuiAddress('0x' + toHex(randomBytes(32)));
 }
 
 function requireEnv(name: string): string {
@@ -141,11 +145,19 @@ async function exec(
   return { digest: t.digest, createdByType, createdRefs };
 }
 
+/** The single created object of `type`, or throw if not exactly one. */
+function oneOf(ok: TxOk, type: string, label: string): string {
+  const ids = ok.createdByType.get(type) ?? [];
+  if (ids.length !== 1) {
+    throw new Error(`expected exactly 1 ${label}, got ${ids.length} (type ${type})`);
+  }
+  return ids[0]!;
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
       rpc: { type: 'string' },
-      subject: { type: 'string' },
       pubfile: { type: 'string' },
     },
   });
@@ -156,103 +168,142 @@ async function main(): Promise<void> {
   const pkgs: PublishedPackages = readPubfile(values.pubfile ?? DEFAULT_PUBFILE_PATH);
   const registryId = requireEnv('REGISTRY_ID');
 
-  const subject = values.subject ? normalizeSuiAddress(values.subject) : randomSubject();
-  const boxAddr = boxAddress(registryId, subject);
+  // The two subjects: the dependency, and the package that depends on it.
+  const dependency = pkgs.dependencyExample;
+  const subject = pkgs.subjectExample;
+  const dependencyBox = boxAddress(registryId, dependency);
+  const subjectBox = boxAddress(registryId, subject);
+
+  // Audit (v1) types use audit_example's ORIGINAL id; AuditV2 uses the v2 id.
   const auditType = auditAttestationType({
+    attestationRegistryPkg: pkgs.attestationRegistry,
+    auditExamplePkg: pkgs.auditExampleOriginal,
+  });
+  const auditCapType = `${pkgs.attestationRegistry}::attestation_registry::RevocationCap<${pkgs.auditExampleOriginal}::audit::Audit>`;
+  const auditV2Type = auditV2AttestationType({
     attestationRegistryPkg: pkgs.attestationRegistry,
     auditExamplePkg: pkgs.auditExample,
   });
-  const auditCapType = `${pkgs.attestationRegistry}::attestation_registry::RevocationCap<${pkgs.auditExample}::audit::Audit>`;
 
-  console.log(`sender:        ${sender}`);
-  console.log(`registry:      ${registryId}`);
-  console.log(`subject:       ${subject}`);
-  console.log(`box address:   ${boxAddr}`);
+  console.log(`sender:          ${sender}`);
+  console.log(`registry:        ${registryId}`);
+  console.log(`dependency:      ${dependency}`);
+  console.log(`  box:           ${dependencyBox}`);
+  console.log(`subject:         ${subject}`);
+  console.log(`  box:           ${subjectBox}`);
 
-  console.log('\n▶ TX 1 — create_box');
+  console.log('\n▶ TX 1 — create_box for dependency and subject');
   {
     const tx = new Transaction();
-    createBoxTx(tx, {
-      attestationRegistryPkg: pkgs.attestationRegistry,
-      registryId,
-      subject,
-    });
+    createBoxTx(tx, { attestationRegistryPkg: pkgs.attestationRegistry, registryId, subject: dependency });
+    createBoxTx(tx, { attestationRegistryPkg: pkgs.attestationRegistry, registryId, subject });
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
   }
 
-  console.log('\n▶ TX 2 — attest_audit (will be revoked, score=60)');
-  let revokeAttId: string;
-  let revokeAttRef: { objectId: string; version: string; digest: string };
-  let revokeCapId: string;
+  console.log('\n▶ TX 2 — attest_audit on dependency (score=90, will be revoked)');
+  let depAuditId: string;
+  let depAuditRef: { objectId: string; version: string; digest: string };
+  let depAuditCap: string;
   {
     const tx = new Transaction();
-    const cap = attestAuditTx(tx, {
-      auditExamplePkg: pkgs.auditExample,
-      registryId,
-      subject,
-      score: 60,
-    });
+    const cap = attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject: dependency, score: 90 });
     tx.transferObjects([cap], sender);
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
-    const attIds = ok.createdByType.get(auditType) ?? [];
-    const capIds = ok.createdByType.get(auditCapType) ?? [];
-    if (attIds.length !== 1 || capIds.length !== 1) {
-      throw new Error(`expected 1 attestation + 1 cap in TX 2, got ${attIds.length} + ${capIds.length}`);
-    }
-    revokeAttId = attIds[0]!;
-    revokeCapId = capIds[0]!;
-    revokeAttRef = ok.createdRefs.get(revokeAttId)!;
+    depAuditId = oneOf(ok, auditType, 'Attestation<Audit>');
+    depAuditCap = oneOf(ok, auditCapType, 'RevocationCap<Audit>');
+    depAuditRef = ok.createdRefs.get(depAuditId)!;
   }
 
-  console.log('\n▶ TX 3 — attest_audit (active, score=95)');
+  console.log('\n▶ TX 3 — attest_audit_v2 on subject (score=95, requires dependency audit)');
+  let subjectAuditId: string;
   {
     const tx = new Transaction();
-    const cap = attestAuditTx(tx, {
+    const cap = attestAuditV2Tx(tx, {
       auditExamplePkg: pkgs.auditExample,
       registryId,
       subject,
       score: 95,
+      reportUrl: 'https://audits.example.com/subject-v1.pdf',
+      requires: [depAuditId],
     });
     tx.transferObjects([cap], sender);
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
+    subjectAuditId = oneOf(ok, auditV2Type, 'Attestation<AuditV2>');
   }
 
-  console.log('\n▶ Read — all Audit attestations on subject');
-  let attestations = await listAttestations(client, boxAddr, {
-    typeFilter: auditType,
-    includeDisplay: true,
-  });
-  for (const att of attestations) {
+  console.log('\n▶ TX 4 — attest_vuln on subject (severity=4)');
+  let subjectVulnId: string;
+  {
+    const tx = new Transaction();
+    const [cap] = tx.moveCall({
+      target: `${pkgs.vulnExample}::vuln::attest_vuln`,
+      arguments: [
+        tx.object(registryId),
+        tx.pure.id(subject),
+        tx.pure.u8(4),
+        tx.pure.string('CVE-2026-0001'),
+        tx.pure.string('Example informational finding'),
+      ],
+    });
+    tx.transferObjects([cap!], sender);
+    const ok = await exec(client, signer, tx);
+    console.log(`  digest: ${ok.digest}`);
+    const vulnType = `${pkgs.attestationRegistry}::attestation_registry::Attestation<${pkgs.vulnExample}::vuln::Vulnerability>`;
+    subjectVulnId = oneOf(ok, vulnType, 'Attestation<Vulnerability>');
+  }
+
+  console.log('\n▶ Read — all attestations on subject');
+  for (const att of await listAttestations(client, subjectBox, { includeDisplay: true })) {
     console.log('');
     printAttestation(att);
   }
 
-  console.log('\n▶ TX 4 — revoke score=60 attestation');
+  // Effectiveness honours the transitive `requires` convention: the subject
+  // audit is only effective while the dependency audit it requires is.
+  const ctx = { fetchById: (id: string) => getAttestation(client, id, { includeDisplay: true }) };
+  const reportEffective = async (label: string) => {
+    const root = await getAttestation(client, subjectAuditId, { includeDisplay: true });
+    console.log(`\n▶ ${label}: subject AuditV2 effective = ${await isEffective(root, ctx)}`);
+  };
+
+  await reportEffective('Before revoke');
+
+  console.log('\n▶ TX 5 — revoke the dependency audit');
   {
     const tx = new Transaction();
     revokeTx(tx, {
       attestationRegistryPkg: pkgs.attestationRegistry,
-      boxId: boxAddr,
-      capId: revokeCapId,
-      attestationRef: revokeAttRef,
-      attestationType: `${pkgs.auditExample}::audit::Audit`,
+      boxId: dependencyBox,
+      capId: depAuditCap,
+      attestationRef: depAuditRef,
+      attestationType: `${pkgs.auditExampleOriginal}::audit::Audit`,
     });
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
   }
 
-  console.log('\n▶ Read — all Audit attestations after revoke');
-  attestations = await listAttestations(client, boxAddr, {
-    typeFilter: auditType,
-    includeDisplay: true,
-  });
-  for (const att of attestations) {
-    console.log('');
-    printAttestation(att);
-  }
+  await reportEffective('After revoke');
+
+  // Hand-off for the MVR Postgres seeder.
+  const demoIds = {
+    registryId,
+    attestationRegistryPkg: pkgs.attestationRegistry,
+    subjects: { subject, dependency },
+    trustedAttestors: [
+      { name: 'audit_example', originalId: pkgs.auditExampleOriginal, latestId: pkgs.auditExample },
+      { name: 'vuln_example', originalId: pkgs.vulnExample, latestId: pkgs.vulnExample },
+    ],
+    createdAttestations: {
+      dependencyAudit: depAuditId,
+      subjectAuditV2: subjectAuditId,
+      subjectVuln: subjectVulnId,
+    },
+  };
+  writeFileSync(DEMO_IDS_PATH, JSON.stringify(demoIds, null, 2) + '\n');
+  console.log(`\n▶ wrote ${DEMO_IDS_PATH}`);
 }
 
 main().catch((err) => {

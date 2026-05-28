@@ -2,13 +2,18 @@
 # Full single-command local demo:
 #   - kill any prior `sui start --with-faucet` localnet
 #   - start a fresh one
-#   - test-publish all three packages and register their Displays
+#   - test-publish all packages, upgrade audit_example, register Displays
 #   - run the TS demo
 #   - kill the localnet on exit (success or failure)
 #
 # Usage:
 #   bash scripts/run-demo.sh                    # uses default `sui` on PATH
 #   SUI=/path/to/sui bash scripts/run-demo.sh   # override sui binary
+#   WITH_GRAPHQL=1 bash scripts/run-demo.sh     # also start GraphQL (:9125),
+#                                               # needed by the MVR integration
+#                                               # (requires a local Postgres).
+#                                               # The TS demo itself uses gRPC
+#                                               # and does not need it.
 
 set -euo pipefail
 
@@ -36,11 +41,21 @@ if pgrep -f 'sui start .*--with-faucet' >/dev/null; then
     sleep 1
 fi
 
+GRAPHQL_FLAG=()
+WAIT_PORTS="9000 9123"
+if [[ -n "${WITH_GRAPHQL:-}" ]]; then
+    GRAPHQL_FLAG=(--with-graphql)
+    WAIT_PORTS="9000 9123 9125"
+fi
+
 echo "▶ starting localnet (log: $LOCALNET_LOG)"
-"$SUI" start --force-regenesis --with-faucet > "$LOCALNET_LOG" 2>&1 &
+# `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty, which
+# avoids an "unbound variable" error from `set -u` on bash 3.2 (macOS).
+"$SUI" start --force-regenesis --with-faucet ${GRAPHQL_FLAG[@]+"${GRAPHQL_FLAG[@]}"} > "$LOCALNET_LOG" 2>&1 &
 LOCAL_PID=$!
-# Wait for both the JSON-RPC port (9000) and the faucet port (9123).
-for port in 9000 9123; do
+# Wait for the JSON-RPC port (9000), the faucet port (9123), and — when
+# requested — the GraphQL port (9125).
+for port in $WAIT_PORTS; do
     for _ in {1..60}; do
         if nc -z 127.0.0.1 "$port" 2>/dev/null; then break; fi
         sleep 0.5

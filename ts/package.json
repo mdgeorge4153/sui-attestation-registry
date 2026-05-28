@@ -6,6 +6,7 @@
   "description": "TypeScript library + CLI demo for the attestation_registry Move package.",
   "scripts": {
     "demo": "tsx demo.ts",
+    "test": "tsx --test lib/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
