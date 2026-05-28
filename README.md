@@ -61,35 +61,36 @@ The demo creates a fresh Box, issues two `Attestation<Audit>` (score 60 and
 score 95), lists them with their Display rendering, revokes the score-60 one,
 and re-lists to show the `active=false` transition.
 
+The defaults target a local sui network (`sui start --with-faucet`); to point
+at testnet or another remote network, pass `--rpc <url>` and `--pubfile <path>`.
+
 Prerequisites:
 
-1. Test-publish all three packages to testnet, sharing one ephemeral
-   pubfile across them so each resolves dependencies against the others'
-   just-published addresses. `test-publish`'s default pubfile location is
-   the package directory, so pass `--pubfile-path` explicitly to point at
-   the same file at the repo root (where `ts/demo.ts` looks for it):
+1. Start a localnet in another shell:
    ```bash
-   PUBFILE="$PWD/Pub.testnet.toml"
-   (cd packages/attestation_registry && sui client test-publish --pubfile-path "$PUBFILE")
-   (cd packages/audit_example        && sui client test-publish --pubfile-path "$PUBFILE")
-   (cd packages/vuln_example         && sui client test-publish --pubfile-path "$PUBFILE")
+   sui start --force-regenesis --with-faucet
    ```
-   `Pub.testnet.toml` is gitignored — it's ephemeral and per-user.
-   (`sui client publish` would instead write `Published.toml` for a
-   permanent, checked-in deployment; the PoC defaults to ephemeral.)
-   Alternatively, `sui client test-publish --publish-unpublished-deps
-   --pubfile-path "$PUBFILE"` on, say, `audit_example` deploys it and its
-   unpublished dependencies in one shot.
+   This serves gRPC + JSON-RPC on `127.0.0.1:9000` and a faucet on `:9123`.
 
-2. Note the `Registry` object's ID from the first publish's output (a shared
-   object of type `…::attestation_registry::Registry`). Export it:
+2. Switch your sui CLI to it and faucet a bit of gas:
+   ```bash
+   sui client switch --env local      # use whichever env points at 127.0.0.1:9000
+   sui client faucet
+   ```
+
+3. Test-publish all three packages with one shared pubfile and register the
+   Displays. The script does the whole sequence in one go and prints the
+   `REGISTRY_ID=…` export line you'll need next:
+   ```bash
+   ./scripts/test-publish.sh
+   ```
+   That writes `Pub.localnet.toml` at the repo root (gitignored — ephemeral
+   and per-user).
+
+4. Export the printed Registry id:
    ```bash
    export REGISTRY_ID=0x…
    ```
-
-3. The demo loads your keypair from `~/.sui/sui_config/sui.keystore` (the
-   sui CLI's default location). Your active address needs testnet SUI for
-   gas.
 
 Then:
 
@@ -104,8 +105,9 @@ attestation before and after the revoke.
 
 Options:
 
-- `--rpc <url>` — override the default testnet gRPC endpoint (point at a
-  fork, devnet, etc.).
+- `--rpc <url>` — override the default localnet gRPC endpoint.
+- `--pubfile <path>` — use a different pubfile (e.g. `Pub.testnet.toml`
+  if you've published to testnet instead).
 - `--subject <hex-id>` — re-use a specific subject ID. Default: a fresh
   random ID per run, so `create_box` doesn't collide on re-runs.
 

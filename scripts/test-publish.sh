@@ -14,7 +14,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PUBFILE="${1:-$REPO_ROOT/Pub.testnet.toml}"
+PUBFILE="${1:-$REPO_ROOT/Pub.localnet.toml}"
 PUBFILE="$(cd "$(dirname "$PUBFILE")" && pwd)/$(basename "$PUBFILE")"
 
 # Override SUI to point at a specific sui CLI (e.g., a main-built one with

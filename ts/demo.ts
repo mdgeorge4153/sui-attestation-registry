@@ -8,15 +8,17 @@
  *   - re-list to show the active=false transition
  *
  * Run with:
- *   REGISTRY_ID=0x... pnpm demo [--rpc <url>] [--subject <hex-id>]
+ *   REGISTRY_ID=0x... pnpm demo [--rpc <url>] [--subject <hex-id>] [--pubfile <path>]
+ *
+ * Defaults:
+ *   - --rpc      http://127.0.0.1:9000 (a `sui start --with-faucet` localnet)
+ *   - --pubfile  Pub.localnet.toml at the repo root
  *
  * Requires:
- *   - All three packages published to testnet, with addresses recorded in
- *     `Pub.testnet.toml` at the repo root.
- *   - REGISTRY_ID env var set to the shared `Registry` object created by
- *     attestation_registry's `init` (publish output prints it).
+ *   - All three packages test-published with `scripts/test-publish.sh`, which
+ *     writes the pubfile and prints the REGISTRY_ID line you should export.
  *   - The sui CLI's keystore at `~/.sui/sui_config/sui.keystore`, with the
- *     active address funded on testnet.
+ *     active address funded on the target network.
  */
 
 import { readFileSync } from 'node:fs';
@@ -44,7 +46,8 @@ import {
 } from './lib/index.js';
 
 const KEYSTORE_PATH = join(homedir(), '.sui', 'sui_config', 'sui.keystore');
-const PUBFILE_PATH = join(import.meta.dirname, '..', 'Pub.testnet.toml');
+const DEFAULT_PUBFILE_PATH = join(import.meta.dirname, '..', 'Pub.localnet.toml');
+const DEFAULT_RPC = 'http://127.0.0.1:9000';
 
 function loadKeypair(): Ed25519Keypair {
   const raw = readFileSync(KEYSTORE_PATH, 'utf8');
@@ -143,13 +146,14 @@ async function main(): Promise<void> {
     options: {
       rpc: { type: 'string' },
       subject: { type: 'string' },
+      pubfile: { type: 'string' },
     },
   });
 
-  const client = makeClient(values.rpc);
+  const client = makeClient(values.rpc ?? DEFAULT_RPC);
   const signer = loadKeypair();
   const sender = signer.toSuiAddress();
-  const pkgs: PublishedPackages = readPubfile(PUBFILE_PATH);
+  const pkgs: PublishedPackages = readPubfile(values.pubfile ?? DEFAULT_PUBFILE_PATH);
   const registryId = requireEnv('REGISTRY_ID');
 
   const subject = values.subject ? normalizeSuiAddress(values.subject) : randomSubject();
