@@ -168,6 +168,36 @@ expressive choice than SIP-56's universal `created_by` — the schema
 author decides whether per-attestation signer identity is part of the
 trust signal.
 
+**Side benefit: trust grouping through package upgrades.** Because the
+recorded attester resolves to `T`'s defining package's *original*
+publish address (via `type_name::original_id<T>()`), all attestation
+types defined by the same package share an on-chain identity that's
+stable across upgrades. An auditor that publishes an `Audit` type and
+later upgrades the package to add `LightAudit`, `SourceVerification`,
+etc., has those new types automatically classified under the same
+attester. Consumer trust lists key by package address — a list of
+"trusted auditors" works at the granularity of "this package's
+attestations," and any new attestation types the auditor introduces
+ride along under the same trust grouping.
+
+This composes correctly at the security level: upgrade authority *is*
+attestation-dynamics authority. If you've trusted the auditor's
+existing attestations, you've already implicitly trusted that they
+could change the rules via upgrade — so trusting their new types
+automatically is the consistent position rather than an oversight. The
+caveat: an accidental fresh publish (rather than an upgrade) of the
+same source produces a *new* attester identity because the original
+publish address changes. "Upgrade, don't re-publish" is the schema
+author's discipline; if they slip, downstream trust lists won't roll
+over to the new package address automatically (which is arguably the
+correct behavior anyway — re-publishing is a meaningfully different
+on-chain identity).
+
+SIP-56's per-attestation `created_by` doesn't compose this way: each
+attestation's identity is the signer keypair, with no on-chain
+grouping primitive that survives upgrades or even spans multiple
+attestation types from the same author.
+
 ### 4. No pinning — curation is a consumer concern
 
 SIP-56 has pin/unpin operations callable by the receiver's package
