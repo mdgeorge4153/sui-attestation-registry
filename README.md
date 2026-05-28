@@ -61,6 +61,20 @@ The demo creates a fresh Box, issues two `Attestation<Audit>` (score 60 and
 score 95), lists them with their Display rendering, revokes the score-60 one,
 and re-lists to show the `active=false` transition.
 
+### One-command (recommended for iteration)
+
+```bash
+bash scripts/run-demo.sh
+```
+
+`scripts/run-demo.sh` owns the full lifecycle: kills any stale localnet,
+starts a fresh `sui start --with-faucet`, waits for the JSON-RPC and faucet
+ports, faucets gas, test-publishes all three packages, registers Displays,
+runs the demo, and **kills the localnet on exit** (success or failure).
+Override the sui CLI binary with `SUI=/path/to/sui bash scripts/run-demo.sh`.
+
+### Step-by-step (testnet or manual exploration)
+
 The defaults target a local sui network (`sui start --with-faucet`); to point
 at testnet or another remote network, pass `--rpc <url>` and `--pubfile <path>`.
 
