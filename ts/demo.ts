@@ -95,6 +95,10 @@ async function exec(
   signer: Ed25519Keypair,
   tx: Transaction,
 ): Promise<TxOk> {
+  // sui-fork doesn't implement SimulateTransaction yet, which the SDK
+  // would otherwise call to compute the gas budget. Set it explicitly so
+  // build skips simulation.
+  tx.setGasBudget(100_000_000n);
   const res = await client.signAndExecuteTransaction({
     signer,
     transaction: tx,

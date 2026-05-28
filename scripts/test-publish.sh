@@ -17,6 +17,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PUBFILE="${1:-$REPO_ROOT/Pub.testnet.toml}"
 PUBFILE="$(cd "$(dirname "$PUBFILE")" && pwd)/$(basename "$PUBFILE")"
 
+# Override SUI to point at a specific sui CLI (e.g., a main-built one with
+# gRPC support for talking to a sui-fork localnet). Defaults to `sui` on PATH.
+SUI="${SUI:-sui}"
+
 # Sui's system display registry is a well-known shared object.
 DISPLAY_REGISTRY=0xd
 GAS_BUDGET=100000000
@@ -56,7 +60,7 @@ for pkg in attestation_registry audit_example vuln_example; do
     echo "▶ test-publish $pkg"
     json_out=$(mktemp)
     if ! (cd "$REPO_ROOT/packages/$pkg" \
-            && sui client test-publish --build-env testnet --pubfile-path "$PUBFILE" --json) \
+            && "$SUI" client test-publish --build-env testnet --pubfile-path "$PUBFILE" --gas-budget "$GAS_BUDGET" --json) \
             > "$json_out" 2>&1; then
         echo "  FAILED. Output:"
         cat "$json_out"
@@ -105,7 +109,7 @@ else
     echo
     echo "▶ register_audit_display"
     if ! (cd "$REPO_ROOT/packages/audit_example" && \
-            sui client call \
+            "$SUI" client call \
                 --package "$PKG_AUDIT" --module audit --function register_audit_display \
                 --args "$DISPLAY_REGISTRY" \
                 --gas-budget "$GAS_BUDGET" >/dev/null 2>&1); then
@@ -117,7 +121,7 @@ else
     echo
     echo "▶ register_vuln_display"
     if ! (cd "$REPO_ROOT/packages/vuln_example" && \
-            sui client call \
+            "$SUI" client call \
                 --package "$PKG_VULN" --module vuln --function register_vuln_display \
                 --args "$DISPLAY_REGISTRY" \
                 --gas-budget "$GAS_BUDGET" >/dev/null 2>&1); then
