@@ -10,7 +10,7 @@ introduced primitives (derived addresses) that didn't exist in the original
 proposal but that both designs now build on.
 
 This document proposes that **this PoC's design should supersede SIP-56**
-once derived addresses ship as a stable platform feature. The remainder
+now that derived addresses ship as a stable platform feature. The remainder
 explains where the two designs already agree (post-PR), where they still
 diverge, and why each remaining divergence is an improvement.
 
@@ -98,11 +98,14 @@ optional step gated by `Permit<T>`.
 
 **Why this is an improvement**:
 - *Display immutability* is achieved without a registration step by
-  burning the `DisplayCap` after the initial `set` calls
-  (`transfer::public_transfer(cap, @0x0)`). The result is the same — no
-  one can mutate the Display after publish — without an extra surface
-  area. SIP-56's frozen `AttestationType<T>` and this PoC's cap-burn are
-  near-equivalent mechanisms for the same outcome.
+  freezing a module-private `DisplayLock<T>` wrapper that holds the
+  `DisplayCap`. This is the **same freeze-a-wrapper mechanism** SIP-56's
+  PR-evolved design uses (amnn's `AttestationType<T>` proposal wraps
+  `DisplayCap` and freezes it). The only difference is that SIP-56 also
+  wires its frozen wrapper into authorization (passing
+  `&AttestationType<T>` to `attest`), while this PoC's `DisplayLock<T>`
+  has no further role after registration. The Display-immutability
+  property is identical.
 - *Type self-discoverability* is treated here as an off-chain concern.
   Indexers can enumerate `Attestation<T>` instances by struct-type filter
   (via `getOwnedObjects`); a wallet wanting "all known attestation types"
@@ -266,7 +269,7 @@ plays out in this PoC:
 | Pinning: hide vs. highlight | Switched to highlight | Removed entirely (consumer concern) |
 | Modifying attestations | Receive-modify-retransfer via derived addresses | Adopted (in `revoke`) |
 | Authorization scheme | Sender → `*Cap` pattern | Adopted (`RevocationCap<T>`) |
-| Display immutability | Frozen `AttestationType<T>` wraps `DisplayCap` | Cap-burn discipline (near-equivalent outcome) |
+| Display immutability | Frozen `AttestationType<T>` wraps `DisplayCap` | Same freeze-a-wrapper mechanism (`DisplayLock<T>`) |
 | Self-discoverable types | Frontends fetch list via on-chain `AttestationType<T>` | Off-chain via event subscription |
 | Derived addresses timeline | Acknowledged as months out; PoC initially worked around it | This PoC is built directly on them |
 

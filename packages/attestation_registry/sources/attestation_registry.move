@@ -77,6 +77,16 @@ public struct Revoked<phantom T> has copy, drop {
     subject: ID,
 }
 
+/// Frozen wrapper that locks a `DisplayCap<Attestation<T>>` so the Display
+/// template registered by `register_display` is permanently immutable. The
+/// `cap` field is module-private; freezing makes the wrapper itself
+/// immovable and unsharable; together those make the cap permanently
+/// inaccessible without the @0x0 transfer anti-pattern.
+public struct DisplayLock<T: store> has key {
+    id: UID,
+    cap: display_registry::DisplayCap<Attestation<T>>,
+}
+
 // === Setup ===
 
 /// Create the `Registry` singleton at publish time.
@@ -169,6 +179,7 @@ public fun revoke<T: store>(
 /// One field is appended automatically: `active` rendering `true`/`false`.
 /// Schemas adopting cross-cutting conventions (`expires_at`, `requires`,
 /// etc. — see CONVENTIONS.md) include those fields themselves.
+#[allow(lint(freeze_wrapped))]
 public fun register_display<T: store>(
     display_registry: &mut DisplayRegistry,
     mut fields: vector<String>,
@@ -187,8 +198,12 @@ public fun register_display<T: store>(
     fields.zip_do!(values, |field, value| display.set(&cap, field, value));
     display_registry::share(display);
 
-    // Burn the DisplayCap so the template is permanently immutable.
-    transfer::public_transfer(cap, @0x0);
+    // Lock the DisplayCap inside a frozen wrapper so the template is
+    // permanently immutable. The wrapper struct's `cap` field is private to
+    // this module, so external code can't extract the cap; freezing makes
+    // the wrapper itself immovable; together that's equivalent in effect to
+    // destroying the cap (which the framework doesn't expose a way to do).
+    transfer::freeze_object(DisplayLock<T> { id: object::new(ctx), cap });
 }
 
 // === Test seam ===
