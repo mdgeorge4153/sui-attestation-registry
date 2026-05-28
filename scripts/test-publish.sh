@@ -56,7 +56,7 @@ for pkg in attestation_registry audit_example vuln_example; do
     echo "▶ test-publish $pkg"
     json_out=$(mktemp)
     if ! (cd "$REPO_ROOT/packages/$pkg" \
-            && sui client test-publish --pubfile-path "$PUBFILE" --json) \
+            && sui client test-publish --build-env testnet --pubfile-path "$PUBFILE" --json) \
             > "$json_out" 2>&1; then
         echo "  FAILED. Output:"
         cat "$json_out"
