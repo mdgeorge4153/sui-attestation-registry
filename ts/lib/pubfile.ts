@@ -16,7 +16,11 @@ export function readPubfile(path: string): PublishedPackages {
 
   const find = (sourceDir: string): string => {
     for (const block of blocks) {
-      const sourceMatch = block.match(/^\s*source\s*=\s*"([^"]+)"/m);
+      // Sui's test-publish emits `source = { local = "..." }`; tolerate
+      // the bare `source = "..."` shape too.
+      const sourceMatch =
+        block.match(/^\s*source\s*=\s*\{\s*local\s*=\s*"([^"]+)"/m) ??
+        block.match(/^\s*source\s*=\s*"([^"]+)"/m);
       const publishedAtMatch = block.match(/^\s*published-at\s*=\s*"([^"]+)"/m);
       if (sourceMatch && publishedAtMatch && sourceMatch[1]!.includes(sourceDir)) {
         return normalizeSuiAddress(publishedAtMatch[1]!);

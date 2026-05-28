@@ -104,6 +104,13 @@ async function exec(
     throw new Error(`tx failed: ${JSON.stringify(res, null, 2)}`);
   }
   const t = res.Transaction;
+  const status = t.status as { success: boolean; error: unknown };
+  if (!status.success) {
+    throw new Error(`tx ${t.digest} failed: ${JSON.stringify(t.status)}`);
+  }
+  // Wait for the tx to be visible across replicas before the next call
+  // simulates against a snapshot that might not yet include it.
+  await client.waitForTransaction({ digest: t.digest });
   const effects = t.effects;
   const objectTypes = t.objectTypes ?? {};
   const createdByType = new Map<string, string[]>();
