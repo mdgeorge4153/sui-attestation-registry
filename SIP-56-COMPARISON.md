@@ -114,34 +114,59 @@ optional step gated by `Permit<T>`.
   for schema authors) for a feature that doesn't need to be on-chain to
   work.
 
-### 3. `Permit<T>`-gated attest, not permissionless
+### 3. Attester identity rooted in `T`'s package, not the signer's keypair
 
-SIP-56's `attestation::attest` is permissionless: anyone can call it, with
-any registered type. Restrictions on who can attest are expected to live in
-the schema package, which exposes its own gated wrapper before forwarding
-to `attest`.
+SIP-56's recorded attester is `created_by: address` = `tx.sender()` — the
+keypair that signed the transaction.
 
-This PoC's `attest<T>` requires `Permit<T>` from `std::internal`, which is
-bytecode-restricted to `T`'s defining module. Only `T`'s defining package
-can call `attest<T>` — and by extension, only that package's code can
-produce an `Attestation<T>` whose recorded attester is itself. Schemas
-wanting third-party attesters expose their own wrappers.
+This PoC's attester (emitted on the `Attested` event) is `T`'s defining
+package address, resolved at mint time via `type_name::original_id<T>()`.
 
-**Why this is an improvement**: in both designs, the recorded "attester"
-identity is what consumers use to evaluate trust. Under SIP-56's design,
-the recorded attester is `created_by` = `tx.sender()` — the keypair that
-signed the transaction. Under this PoC, the recorded attester is `T`'s
-package address, resolved via `type_name::original_id<T>()` at mint time.
+The mechanism: `attest<T>(registry, subject, data: T, ctx)` takes a `T`
+value, and Move's construction rules restrict producing a `T` to `T`'s
+defining module. So the existence of an `Attestation<T>` on-chain is
+**bytecode proof** that `T`'s defining package's code path was taken to
+mint it. No separate permit or capability is needed; the type system
+already enforces this.
 
-The `Permit<T>`-gated design makes that identity **bytecode-verifiable**:
-the existence of an `Attestation<T>` on-chain proves that `T`'s defining
-package's code path was taken. SIP-56's design makes the identity "the
-person who signed the tx," which is much weaker — a third party calling
-a schema's permissive wrapper looks identical on-chain to the schema
-package's own code path.
+**Why this is an improvement**: for a trust-signal primitive, "this came
+from the protocol that defined the type" is a stronger and more useful
+guarantee than "this address signed the tx." Under SIP-56's design, a
+third party calling a schema's permissive wrapper looks identical on-chain
+to the schema package's own code path; the `created_by` field tells you
+which keypair signed, not which protocol vouches.
 
-For a trust-signal primitive, "this came from the protocol that defined
-the type" is the stronger and more useful guarantee.
+**Schemas can still opt into permissionless attestation** — they just
+express it explicitly in the schema's data type. The pattern is to
+include a `sender: address` (or similarly named) field in `T` and have
+the schema's constructor populate it from `ctx.sender()`:
+
+```move
+public struct UserAudit has store, drop {
+    score: u8,
+    sender: address,
+}
+
+public fun attest_user_audit(
+    registry: &Registry, subject: ID, score: u8, ctx: &mut TxContext,
+): RevocationCap<UserAudit> {
+    attestation_registry::attest<UserAudit>(
+        registry,
+        subject,
+        UserAudit { score, sender: ctx.sender() },
+        ctx,
+    )
+}
+```
+
+Now anyone can call `attest_user_audit`. The recorded attester (at the
+type level, available to indexer queries) is still the schema package
+("this is a UserAudit attestation"), but the per-attestation signer is
+captured in the data ("by *this* address"). Off-chain consumers see both
+pieces and can weight them as they like. This is a strictly more
+expressive choice than SIP-56's universal `created_by` — the schema
+author decides whether per-attestation signer identity is part of the
+trust signal.
 
 ### 4. No pinning — curation is a consumer concern
 
@@ -289,11 +314,12 @@ typical mitigation:
   `requires` convention in `CONVENTIONS.md` is a starting point for
   expressing dependency relationships between attestations on-chain
   without involving the package author.
-- **"We need permissionless attest"**: schema packages can wrap
-  `attest<T>` and expose a permissive `attest_for_anyone<T>(data, ctx)`
-  that mints `Permit<T>` internally. The registry's bytecode guarantee
-  becomes "the schema package allowed this," which is the same property
-  SIP-56 has by default.
+- **"We need permissionless attest"**: schema packages express this in
+  the schema by exposing a public constructor and (typically) embedding
+  `sender: address` in the data. See Section 3 above for the pattern.
+  The registry's bytecode guarantee remains "this came from the schema
+  package's code path"; the schema decides whether per-attestation
+  signer identity is part of the recorded data.
 
 The point of the divergences isn't that SIP-56's positions are wrong, but
 that the alternatives are expressible at higher layers and don't need to

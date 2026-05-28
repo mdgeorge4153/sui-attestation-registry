@@ -64,7 +64,7 @@ fun test_attest_aborts_when_box_missing() {
         &registry,
         subject,
         TestSchema { tag: 1 },
-        std::internal::permit<TestSchema>(),
+
         scenario.ctx(),
     );
     // unreachable; satisfy the move borrow checker
@@ -83,7 +83,7 @@ fun test_attest_and_read() {
         &registry,
         subject,
         TestSchema { tag: 42 },
-        std::internal::permit<TestSchema>(),
+
         scenario.ctx(),
     );
     transfer::public_transfer(cap, ALICE);
@@ -116,11 +116,11 @@ fun test_reissuance_succeeds() {
     let registry: Registry = scenario.take_shared();
     let cap1 = attestation_registry::attest<TestSchema>(
         &registry, subject, TestSchema { tag: 1 },
-        std::internal::permit<TestSchema>(), scenario.ctx(),
+        scenario.ctx(),
     );
     let cap2 = attestation_registry::attest<TestSchema>(
         &registry, subject, TestSchema { tag: 2 },
-        std::internal::permit<TestSchema>(), scenario.ctx(),
+        scenario.ctx(),
     );
     transfer::public_transfer(cap1, ALICE);
     transfer::public_transfer(cap2, ALICE);
@@ -145,7 +145,7 @@ fun test_revoke_flips_is_active() {
     let registry: Registry = scenario.take_shared();
     let cap = attestation_registry::attest<TestSchema>(
         &registry, subject, TestSchema { tag: 7 },
-        std::internal::permit<TestSchema>(), scenario.ctx(),
+        scenario.ctx(),
     );
     transfer::public_transfer(cap, ALICE);
     test_scenario::return_shared(registry);
@@ -191,11 +191,11 @@ fun test_revoke_with_wrong_cap_aborts() {
     let registry: Registry = scenario.take_shared();
     let cap_a = attestation_registry::attest<TestSchema>(
         &registry, subject, TestSchema { tag: 1 },
-        std::internal::permit<TestSchema>(), scenario.ctx(),
+        scenario.ctx(),
     );
     let cap_b = attestation_registry::attest<TestSchema>(
         &registry, subject, TestSchema { tag: 2 },
-        std::internal::permit<TestSchema>(), scenario.ctx(),
+        scenario.ctx(),
     );
     transfer::public_transfer(cap_a, ALICE);
     transfer::public_transfer(cap_b, @0x0);

@@ -60,7 +60,6 @@ public fun attest_vuln(
         registry,
         subject,
         Vulnerability { severity, cve_id, description },
-        std::internal::permit<Vulnerability>(),
         ctx,
     )
 }

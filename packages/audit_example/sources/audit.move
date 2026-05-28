@@ -41,7 +41,6 @@ public fun attest_audit(
         registry,
         subject,
         Audit { score },
-        std::internal::permit<Audit>(),
         ctx,
     )
 }

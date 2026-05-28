@@ -122,16 +122,16 @@ public fun attester_of<T>(): address { type_name::original_id<T>() }
 
 // === Attest / Revoke ===
 
-/// Attest about `subject` (under `registry`) with `data`. Requires a
-/// `Permit<T>` proving the call originated from `T`'s defining package.
-/// Aborts `EBoxDoesNotExist` if no Box exists for this subject (call
-/// `create_box` first). Returns a `RevocationCap<T>` that can later be used
-/// to revoke this attestation.
+/// Attest about `subject` (under `registry`) with `data`. The caller must
+/// produce a `T` value, which Move's construction rules already restrict to
+/// `T`'s defining package — that's the property `attester_of<T>()` records
+/// (no separate `Permit<T>` needed). Aborts `EBoxDoesNotExist` if no Box
+/// exists for this subject (call `create_box` first). Returns a
+/// `RevocationCap<T>` for later revocation.
 public fun attest<T: store>(
     registry: &Registry,
     subject: ID,
     data: T,
-    _: Permit<T>,
     ctx: &mut TxContext,
 ): RevocationCap<T> {
     assert!(derived_object::exists(&registry.id, subject), EBoxDoesNotExist);
