@@ -90,3 +90,15 @@ REGISTRY_ID="$REGISTRY_ID" pnpm --dir "$REPO_ROOT/ts" demo
 
 echo
 echo "▶ done"
+
+# For the MVR integration the localnet must outlive this script so the demo
+# server (resolution) and the frontend (chain reads) can use it. KEEP_ALIVE
+# blocks here, holding the localnet up until interrupted (Ctrl-C), at which
+# point the EXIT trap tears it down.
+if [[ -n "${KEEP_ALIVE:-}" ]]; then
+    echo
+    echo "▶ localnet staying up (KEEP_ALIVE). Registry id: $REGISTRY_ID"
+    echo "  demo-ids.json written to $REPO_ROOT/demo-ids.json"
+    echo "  Press Ctrl-C to stop."
+    wait "$LOCAL_PID"
+fi
