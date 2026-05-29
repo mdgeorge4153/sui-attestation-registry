@@ -9,6 +9,8 @@ use attestation_registry::attestation_registry::{Self, Registry, RevocationCap};
 /// `Attestation<Audit>` is audit_example's published address.
 public struct Audit has store, drop {
     score: u8,
+    /// URL of the full audit report (surfaced via the `link` convention).
+    report_url: String,
 }
 
 /// One-shot setup: register the immutable `Display<Attestation<Audit>>`.
@@ -20,10 +22,16 @@ public fun register_audit_display(
 ) {
     attestation_registry::register_display<Audit>(
         display_registry,
-        vector[name_field(), description_field(), b"polarity".to_string()],
+        vector[
+            name_field(),
+            description_field(),
+            b"link".to_string(),
+            b"polarity".to_string(),
+        ],
         vector[
             b"Audit attestation".to_string(),
             b"Score: {data.score}/100".to_string(),
+            b"{data.report_url}".to_string(),
             b"positive".to_string(),
         ],
         std::internal::permit<Audit>(),
@@ -36,12 +44,13 @@ public fun attest_audit(
     registry: &Registry,
     subject: ID,
     score: u8,
+    report_url: String,
     ctx: &mut TxContext,
 ): RevocationCap<Audit> {
     attestation_registry::attest<Audit>(
         registry,
         subject,
-        Audit { score },
+        Audit { score, report_url },
         ctx,
     )
 }

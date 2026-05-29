@@ -207,7 +207,7 @@ async function main(): Promise<void> {
   let depAuditCap: string;
   {
     const tx = new Transaction();
-    const cap = attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject: dependency, score: 90 });
+    const cap = attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject: dependency, score: 90, reportUrl: 'https://audits.example.com/dependency-v1.pdf' });
     tx.transferObjects([cap], sender);
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
@@ -227,6 +227,7 @@ async function main(): Promise<void> {
         tx.pure.u8(7),
         tx.pure.string('CVE-2026-0042'),
         tx.pure.string('Heap overflow in the dependency'),
+        tx.pure.string('https://scanner.example.com/CVE-2026-0042'),
       ],
     });
     tx.transferObjects([cap!], sender);
@@ -255,7 +256,7 @@ async function main(): Promise<void> {
   console.log('\n▶ TX 3b — attest_audit on subject (score=88, stays effective)');
   {
     const tx = new Transaction();
-    const cap = attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject, score: 88 });
+    const cap = attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject, score: 88, reportUrl: 'https://audits.example.com/subject-v1.pdf' });
     tx.transferObjects([cap], sender);
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
@@ -273,6 +274,7 @@ async function main(): Promise<void> {
         tx.pure.u8(4),
         tx.pure.string('CVE-2026-0001'),
         tx.pure.string('Example informational finding'),
+        tx.pure.string('https://scanner.example.com/CVE-2026-0001'),
       ],
     });
     tx.transferObjects([cap!], sender);

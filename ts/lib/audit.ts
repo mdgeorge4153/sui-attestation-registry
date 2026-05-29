@@ -12,6 +12,7 @@ export function attestAuditTx(
     registryId: string;
     subject: string;
     score: number;
+    reportUrl: string;
   },
 ): TransactionObjectArgument {
   const [cap] = tx.moveCall({
@@ -20,6 +21,7 @@ export function attestAuditTx(
       tx.object(args.registryId),
       tx.pure.id(args.subject),
       tx.pure.u8(args.score),
+      tx.pure.string(args.reportUrl),
     ],
   });
   return cap!;

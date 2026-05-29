@@ -19,6 +19,8 @@ public struct Vulnerability has store, drop {
     cve_id: String,
     /// Short human-readable description.
     description: String,
+    /// URL of the advisory / full write-up (surfaced via the `link` convention).
+    advisory_url: String,
 }
 
 /// One-shot setup: register the immutable `Display<Attestation<Vulnerability>>`.
@@ -33,6 +35,7 @@ public fun register_vuln_display(
             b"description".to_string(),
             b"severity".to_string(),
             b"cve_id".to_string(),
+            b"link".to_string(),
             b"polarity".to_string(),
         ],
         vector[
@@ -40,6 +43,7 @@ public fun register_vuln_display(
             b"{data.description}".to_string(),
             b"{data.severity}".to_string(),
             b"{data.cve_id}".to_string(),
+            b"{data.advisory_url}".to_string(),
             b"negative".to_string(),
         ],
         std::internal::permit<Vulnerability>(),
@@ -56,12 +60,13 @@ public fun attest_vuln(
     severity: u8,
     cve_id: String,
     description: String,
+    advisory_url: String,
     ctx: &mut TxContext,
 ): RevocationCap<Vulnerability> {
     attestation_registry::attest<Vulnerability>(
         registry,
         subject,
-        Vulnerability { severity, cve_id, description },
+        Vulnerability { severity, cve_id, description, advisory_url },
         ctx,
     )
 }
