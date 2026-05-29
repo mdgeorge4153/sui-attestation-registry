@@ -38,7 +38,7 @@ public fun register_vuln_display(
         vector[
             b"Vulnerability disclosure".to_string(),
             b"{data.description}".to_string(),
-            b"{data.severity}/10".to_string(),
+            b"{data.severity}".to_string(),
             b"{data.cve_id}".to_string(),
             b"negative".to_string(),
         ],

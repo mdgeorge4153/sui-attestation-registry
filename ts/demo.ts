@@ -216,6 +216,24 @@ async function main(): Promise<void> {
     depAuditRef = ok.createdRefs.get(depAuditId)!;
   }
 
+  console.log('\n▶ TX 2b — attest_vuln on dependency (effective; should propagate to subject)');
+  {
+    const tx = new Transaction();
+    const [cap] = tx.moveCall({
+      target: `${pkgs.vulnExample}::vuln::attest_vuln`,
+      arguments: [
+        tx.object(registryId),
+        tx.pure.id(dependency),
+        tx.pure.u8(7),
+        tx.pure.string('CVE-2026-0042'),
+        tx.pure.string('Heap overflow in the dependency'),
+      ],
+    });
+    tx.transferObjects([cap!], sender);
+    const ok = await exec(client, signer, tx);
+    console.log(`  digest: ${ok.digest}`);
+  }
+
   console.log('\n▶ TX 3 — attest_audit_v2 on subject (score=95, requires dependency audit)');
   let subjectAuditId: string;
   {

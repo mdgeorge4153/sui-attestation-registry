@@ -109,6 +109,30 @@ that depends on it. Propagation is the negative-polarity dual of `requires`:
 propagation is implicit and graph-derived, pushing toward dependents. A
 revoked or expired negative attestation does not propagate.
 
+### `severity`
+
+A severity score for negative attestations, reusing **CVSS** (the Common
+Vulnerability Scoring System): a base score from `0.0` to `10.0`. Consumers
+sort negatives by it (most severe first) and map it to the standard CVSS v3.1
+qualitative bands for display:
+
+| Band | Score |
+|------|-------|
+| None | 0.0 |
+| Low | 0.1–3.9 |
+| Medium | 4.0–6.9 |
+| High | 7.0–8.9 |
+| Critical | 9.0–10.0 |
+
+```move
+fields.push_back(b"severity".to_string());
+values.push_back(b"{data.severity}".to_string());
+```
+
+The field renders the raw number so it is machine-sortable; the consumer
+formats it (e.g. `7 · High`). A schema using integer scores (`0`–`10`) is a
+valid subset. Absence means unscored.
+
 ## Presentation fields
 
 These don't affect effectiveness; they're how an attestation renders. They
