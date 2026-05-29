@@ -234,6 +234,15 @@ async function main(): Promise<void> {
     subjectAuditId = oneOf(ok, auditV2Type, 'Attestation<AuditV2>');
   }
 
+  console.log('\n▶ TX 3b — attest_audit on subject (score=88, stays effective)');
+  {
+    const tx = new Transaction();
+    const cap = attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject, score: 88 });
+    tx.transferObjects([cap], sender);
+    const ok = await exec(client, signer, tx);
+    console.log(`  digest: ${ok.digest}`);
+  }
+
   console.log('\n▶ TX 4 — attest_vuln on subject (severity=4)');
   let subjectVulnId: string;
   {
@@ -255,6 +264,25 @@ async function main(): Promise<void> {
     subjectVulnId = oneOf(ok, vulnType, 'Attestation<Vulnerability>');
   }
 
+  // Negative test data: two attestations a trust consumer must filter out — one
+  // from an untrusted attester (filtered on the package), one of a trusted
+  // package's type with no registered Display (filtered on the Display-gate).
+  console.log('\n▶ TX 5 — attest_untrusted + attest_internal_note (both should be filtered out)');
+  {
+    const tx = new Transaction();
+    const [u] = tx.moveCall({
+      target: `${pkgs.untrustedExample}::untrusted::attest_untrusted`,
+      arguments: [tx.object(registryId), tx.pure.id(subject), tx.pure.string('not whitelisted')],
+    });
+    const [n] = tx.moveCall({
+      target: `${pkgs.auditExample}::audit_v2::attest_internal_note`,
+      arguments: [tx.object(registryId), tx.pure.id(subject), tx.pure.string('no Display registered')],
+    });
+    tx.transferObjects([u!, n!], sender);
+    const ok = await exec(client, signer, tx);
+    console.log(`  digest: ${ok.digest}`);
+  }
+
   console.log('\n▶ Read — all attestations on subject');
   for (const att of await listAttestations(client, subjectBox, { includeDisplay: true })) {
     console.log('');
@@ -271,7 +299,7 @@ async function main(): Promise<void> {
 
   await reportEffective('Before revoke');
 
-  console.log('\n▶ TX 5 — revoke the dependency audit');
+  console.log('\n▶ TX 6 — revoke the dependency audit');
   {
     const tx = new Transaction();
     revokeTx(tx, {

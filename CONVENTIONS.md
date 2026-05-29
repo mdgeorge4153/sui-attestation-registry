@@ -85,6 +85,59 @@ Schemas that need acyclicity should enforce it at issue time (e.g., by
 checking that none of the targets transitively reference the new attestation
 before issuing).
 
+### `polarity`
+
+Distinguishes **positive** attestations (an assertion of good standing — e.g.
+an audit) from **negative** ones (an assertion of a problem — e.g. a
+vulnerability disclosure). The field renders the literal string `positive` or
+`negative`; absence defaults to `positive`.
+
+```move
+fields.push_back(b"polarity".to_string());
+values.push_back(b"positive".to_string()); // or b"negative"
+```
+
+Polarity is a fixed property of the schema, so the template hardcodes it
+rather than reading `data`.
+
+Consumers use it to render the two kinds differently and — for negatives — to
+**propagate**: a negative attestation that is effective on a package is
+surfaced on that package's *dependents* (transitively, via the dependency
+graph), so a vulnerability in a dependency shows up when browsing anything
+that depends on it. Propagation is the negative-polarity dual of `requires`:
+`requires` is an explicit, per-attestation link pulling toward the dependency;
+propagation is implicit and graph-derived, pushing toward dependents. A
+revoked or expired negative attestation does not propagate.
+
+## Presentation fields
+
+These don't affect effectiveness; they're how an attestation renders. They
+reuse the **standard Sui Display field names**, so an `Attestation<T>` shows up
+sensibly in any Display-aware tool (wallets, explorers), not just bespoke
+consumers.
+
+- **`name`** — short title (e.g. `b"Audit attestation"`).
+- **`description`** — human-readable summary; may interpolate `data`
+  (e.g. `b"Score: {data.score}/100"`).
+- **`image_url`** — an image for the attestation: a grade badge, severity
+  glyph, report thumbnail, etc.
+- **`link`** — a URL to the full artifact (the audit report, the CVE record).
+
+```move
+fields.push_back(b"link".to_string());
+values.push_back(b"{data.report_url}".to_string());
+```
+
+**Security note.** `image_url` and `link` are *attester-supplied content*, so:
+
+- They must never be used to derive **identity** — which attester issued an
+  attestation is established by `T`'s defining package (the bytecode-anchored
+  attester), not by anything in these fields. A consumer rendering an attester
+  badge must source it from its own trust config, never from `image_url`.
+- A consumer should treat the URLs defensively: require `https`, and prefer
+  constraining the host to the attester's known domains so one (whitelisted)
+  attester can't render another's branding or point at unrelated hosts.
+
 ## Adding a new convention
 
 A new convention is an additive change: define the field name, its rendered

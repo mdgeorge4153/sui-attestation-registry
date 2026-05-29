@@ -91,7 +91,7 @@ for block in content.split('[[published]]'):
 PY
 }
 
-for pkg in attestation_registry audit_example vuln_example dependency_example subject_example; do
+for pkg in attestation_registry audit_example vuln_example dependency_example subject_example untrusted_example; do
     echo
     echo "▶ test-publish $pkg"
     json_out=$(mktemp)
@@ -142,6 +142,7 @@ echo "  ok"
 # both the `audit` and `audit_v2` modules); original-id is unchanged.
 PKG_AUDIT=$(parse_pkg_field audit_example published-at)
 PKG_VULN=$(parse_pkg_field vuln_example published-at)
+PKG_UNTRUSTED=$(parse_pkg_field untrusted_example published-at)
 
 if [[ -z "$PKG_AUDIT" ]] || [[ -z "$PKG_VULN" ]]; then
     echo "could not resolve package addresses from $PUBFILE — skipping display registration"
@@ -163,9 +164,10 @@ else
         fi
     }
 
-    register_display register_audit_display    "$PKG_AUDIT" audit    register_audit_display
-    register_display register_audit_v2_display "$PKG_AUDIT" audit_v2 register_audit_v2_display
-    register_display register_vuln_display     "$PKG_VULN"  vuln     register_vuln_display
+    register_display register_audit_display     "$PKG_AUDIT"     audit      register_audit_display
+    register_display register_audit_v2_display  "$PKG_AUDIT"     audit_v2   register_audit_v2_display
+    register_display register_vuln_display      "$PKG_VULN"      vuln       register_vuln_display
+    register_display register_untrusted_display "$PKG_UNTRUSTED" untrusted  register_untrusted_display
 fi
 
 echo

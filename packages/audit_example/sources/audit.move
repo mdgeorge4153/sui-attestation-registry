@@ -20,10 +20,11 @@ public fun register_audit_display(
 ) {
     attestation_registry::register_display<Audit>(
         display_registry,
-        vector[name_field(), description_field()],
+        vector[name_field(), description_field(), b"polarity".to_string()],
         vector[
             b"Audit attestation".to_string(),
             b"Score: {data.score}/100".to_string(),
+            b"positive".to_string(),
         ],
         std::internal::permit<Audit>(),
         ctx,

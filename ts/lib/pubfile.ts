@@ -12,6 +12,7 @@ export interface PublishedPackages {
   vulnExample: string;
   subjectExample: string;
   dependencyExample: string;
+  untrustedExample: string;
 }
 
 interface Ids {
@@ -61,5 +62,6 @@ export function readPubfile(path: string): PublishedPackages {
     vulnExample: find('vuln_example').publishedAt,
     subjectExample: find('subject_example').publishedAt,
     dependencyExample: find('dependency_example').publishedAt,
+    untrustedExample: find('untrusted_example').publishedAt,
   };
 }

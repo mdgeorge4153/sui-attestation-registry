@@ -38,12 +38,14 @@ public fun register_audit_v2_display(
             b"description".to_string(),
             b"link".to_string(),
             b"requires".to_string(),
+            b"polarity".to_string(),
         ],
         vector[
             b"Audit attestation (v2)".to_string(),
             b"Score: {data.score}/100".to_string(),
             b"{data.report_url}".to_string(),
             b"{data.requires:json}".to_string(),
+            b"positive".to_string(),
         ],
         std::internal::permit<AuditV2>(),
         ctx,
@@ -76,3 +78,29 @@ public fun report_url(self: &AuditV2): &String { &self.report_url }
 
 /// The attestation ids this audit is conditional on.
 public fun requires(self: &AuditV2): &vector<ID> { &self.requires }
+
+// === Undisplayed schema (negative test data) ===
+//
+// A second schema in this (trusted) package that intentionally has NO
+// registered Display. A trust consumer's Display-gate must filter out
+// `Attestation<InternalNote>` even though its attester package is trusted.
+
+public struct InternalNote has store, drop {
+    text: String,
+}
+
+/// Issue an InternalNote attestation. No Display is registered for
+/// `Attestation<InternalNote>`, so Display-gating consumers ignore it.
+public fun attest_internal_note(
+    registry: &Registry,
+    subject: ID,
+    text: String,
+    ctx: &mut TxContext,
+): RevocationCap<InternalNote> {
+    attestation_registry::attest<InternalNote>(
+        registry,
+        subject,
+        InternalNote { text },
+        ctx,
+    )
+}
