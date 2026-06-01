@@ -13,10 +13,11 @@ see `FUTURE-EXTENSIONS.md`. For the comparison with SIP-56, see
   about a subject. Every on-chain choice was evaluated against "does
   this make the off-chain read story better, the same, or worse?"
 - **Minimal core, conventions for the rest.** The registry's Move
-  surface is small: a Registry, per-subject Boxes, typed Attestations,
-  and bearer RevocationCaps. Anything cross-cutting (expiration,
-  dependency relationships, etc.) is a Display-field convention
-  evaluated off-chain, not a Move type or registry-level concern.
+  surface is small: a Registry, per-subject Boxes, and typed
+  Attestations whose only mutation is a `Permit<T>`-gated `revoke`.
+  Anything cross-cutting — revocation *policy*, expiration, dependency
+  relationships — is pushed out of the core: revocation authority to the
+  schema, the rest to Display-field conventions evaluated off-chain.
 - **Bytecode-verifiable identity.** The recorded attester for an
   `Attestation<T>` resolves to `T`'s defining package's *original*
   publish address. Trust signals are anchored to the package that
@@ -131,30 +132,40 @@ Consequences:
   in the data.
 
 `attest` is *not* gated by `Permit<T>` — Move's construction rule does
-the same job. `register_display` *is* gated by `Permit<T>` because
-Display authority isn't the same as data-construction authority (without
-the permit, anyone could race to register `Display<Attestation<T>>` for
-any T).
+the same job. `register_display` and `revoke` *are* gated by `Permit<T>`,
+because authority over an attestation's presentation and lifecycle is not
+the same as the authority to construct its data, and shouldn't fall to
+whoever happens to hold a `T` value (without the permit, anyone could
+race to register `Display<Attestation<T>>` for any T).
 
-## Revocation: bearer `RevocationCap<T>`
+## Revocation: `Permit<T>`-gated, policy in the schema
 
 ```move
-public struct RevocationCap<phantom T> has key, store {
-    id: UID,
-    attestation_id: ID,
-}
+public fun attest<T: store>(registry, subject, data, ctx): ID
+public fun revoke<T: store>(box: &mut Box, _: Permit<T>, rcv: Receiving<Attestation<T>>)
 ```
 
-`attest<T>` returns a `RevocationCap<T>`. Holding the cap *is* the
-authorization to revoke; there's no separate sender check.
+`revoke` flips `active` to false and re-transfers the attestation to its
+Box. The state transition and the `Revoked<T>` event live here, uniform
+across every attestation type — but the *authority* to call it does not.
+`revoke` is gated by `Permit<T>`, which only `T`'s defining module can
+mint, so the registry prescribes no revocation policy. Each schema
+decides who may revoke and expresses it in its own `revoke_*` wrapper,
+which performs whatever check it wants and then mints the permit.
 
-- To commit irrevocably: `transfer::public_transfer(cap, @0x0)` (or hand
-  it to a multisig-controlled address).
-- To delegate: transfer the cap.
-- `revoke(box, cap, rcv, ctx)` consumes the cap, receives the
-  attestation via `transfer::receive`, flips `active` to false,
-  re-transfers it back to the box. Aborts `ERevokeMismatch` if the cap
-  and receiving ticket don't reference the same attestation.
+`attest` returns the new attestation's `ID` — the one piece a schema
+can't otherwise recover, since the object goes straight to the Box — so a
+schema can bind a bearer cap to it, log it, or ignore it.
+
+This splits the two things a built-in bearer cap used to bundle: the
+*state + event* (kept uniform in the base) from the *authority model*
+(delegated to the schema). It costs the base nothing in expressiveness —
+every policy, including the exact per-attestation bearer cap, is
+reconstructable schema-side (see "Schema-level patterns"). The one
+property it gives up is bytecode-provable *irrevocability*: a schema is
+permanent only by exposing no revoke path, which a later upgrade could
+add. That's weaker than burning a cap, but upgrade authority is already
+attestation-dynamics authority, so it composes.
 
 ## Display registration and the freeze-the-wrapper pattern
 
@@ -218,9 +229,13 @@ The registry is intentionally minimal; schemas express choices about
 their attestation semantics in the schema package, not via registry
 flags:
 
-- **Revocable vs. permanent**: schemas decide whether to hand the cap
-  to the caller (revocable) or burn it to `@0x0` inside their own
-  attest wrapper (permanent).
+- **Revocation policy**: a schema gates its `revoke_*` wrapper however it
+  likes before minting `Permit<T>`. The two example schemas span the
+  range: `audit_example` uses a single `AuditAdminCap` (one authority
+  revokes any audit, across both `Audit` and `AuditV2`); `vuln_example`
+  reconstructs a per-attestation bearer cap (`VulnRevokeCap` bound to the
+  attestation id, with a `transfer::receiving_object_id` guard). A schema
+  that exposes no `revoke_*` wrapper is permanent.
 - **Permissioned vs. permissionless**: schemas decide whether to expose
   a public constructor for their data type. Private constructor =
   permissioned (only the schema package can attest). Public constructor
@@ -244,8 +259,10 @@ flags:
   `borrow`/`put_back` hot-potato pattern and the `T: copy` read-by-copy
   pattern were both worked through and deliberately deferred to
   `FUTURE-EXTENSIONS.md` until a concrete consumer materializes.
-- **Sender-keyed authorization**. Revocation authority is the cap, not
-  `tx.sender()`.
+- **A built-in revocation policy**. The base gates `revoke` on
+  `Permit<T>` and leaves the authority model (bearer cap, admin cap,
+  multisig, …) to the schema — see "Revocation". In particular there is
+  no sender-keyed authorization in the base.
 - **Attestation `store` ability**. `Attestation<T>` is `key`-only;
   external callers can't wrap, transfer, or drop it.
 

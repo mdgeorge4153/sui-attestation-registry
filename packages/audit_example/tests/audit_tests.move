@@ -1,6 +1,7 @@
 #[test_only]
 module audit_example::audit_tests;
 
+use std::string::String;
 use sui::test_scenario;
 use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
@@ -9,6 +10,7 @@ use audit_example::audit::{Self, Audit};
 const ALICE: address = @0xA11CE;
 
 fun subject_for(addr: address): ID { addr.to_id() }
+fun report_url(): String { b"https://audits.example.com/r.pdf".to_string() }
 
 /// Verifies the cross-package attest flow: `audit_example::attest_audit`
 /// produces an accessible attestation, and `attester_of<Audit>` returns
@@ -26,8 +28,7 @@ fun test_attest_audit_cross_package() {
 
     scenario.next_tx(ALICE);
     let registry: Registry = scenario.take_shared();
-    let cap = audit::attest_audit(&registry, subject, 9, scenario.ctx());
-    transfer::public_transfer(cap, ALICE);
+    audit::attest_audit(&registry, subject, 9, report_url(), scenario.ctx());
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
@@ -51,5 +52,48 @@ fun test_attest_audit_cross_package() {
     assert!(audit_pkg != registry_pkg, 3);
 
     test_scenario::return_shared(box);
+    scenario.end();
+}
+
+/// The admin-cap revocation policy: a holder of `AuditAdminCap` revokes an
+/// audit, flipping `is_active` to false.
+#[test]
+fun test_revoke_audit_with_admin_cap() {
+    let subject = subject_for(@0xDEAD);
+    let mut scenario = test_scenario::begin(ALICE);
+    attestation_registry::init_for_testing(scenario.ctx());
+
+    scenario.next_tx(ALICE);
+    let mut registry: Registry = scenario.take_shared();
+    attestation_registry::create_box(&mut registry, subject);
+    test_scenario::return_shared(registry);
+
+    scenario.next_tx(ALICE);
+    let registry: Registry = scenario.take_shared();
+    audit::attest_audit(&registry, subject, 9, report_url(), scenario.ctx());
+    test_scenario::return_shared(registry);
+
+    // Revoke with the admin cap.
+    scenario.next_tx(ALICE);
+    let mut box: Box = scenario.take_shared();
+    let admin = audit::new_admin_cap_for_testing(scenario.ctx());
+    let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<Audit>>(
+        object::id(&box),
+    );
+    let id = ids[0];
+    let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(id);
+    audit::revoke_audit(&admin, &mut box, rcv);
+    transfer::public_transfer(admin, ALICE);
+    test_scenario::return_shared(box);
+
+    // Read back: the audit is now inactive.
+    scenario.next_tx(ALICE);
+    let mut box: Box = scenario.take_shared();
+    let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(id);
+    let a = attestation_registry::borrow_for_testing<Audit>(&mut box, rcv);
+    assert!(!a.is_active(), 0);
+    attestation_registry::put_back_for_testing(&mut box, a);
+    test_scenario::return_shared(box);
+
     scenario.end();
 }

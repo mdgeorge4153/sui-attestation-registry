@@ -1,9 +1,9 @@
-import { Transaction, type TransactionObjectArgument } from '@mysten/sui/transactions';
+import { Transaction } from '@mysten/sui/transactions';
 
 /**
- * Append `audit_example::audit::attest_audit(registry, subject, score)` to
- * `tx`. Returns the `RevocationCap<Audit>` move-call result so the caller
- * can route it (transfer to sender, store in shared state, etc.).
+ * Append `audit_example::audit::attest_audit(registry, subject, score,
+ * report_url)` to `tx`. Audits are revoked via the auditor's `AuditAdminCap`
+ * (see `revokeAuditTx`), not a per-attestation cap, so this returns nothing.
  */
 export function attestAuditTx(
   tx: Transaction,
@@ -14,8 +14,8 @@ export function attestAuditTx(
     score: number;
     reportUrl: string;
   },
-): TransactionObjectArgument {
-  const [cap] = tx.moveCall({
+): void {
+  tx.moveCall({
     target: `${args.auditExamplePkg}::audit::attest_audit`,
     arguments: [
       tx.object(args.registryId),
@@ -24,17 +24,16 @@ export function attestAuditTx(
       tx.pure.string(args.reportUrl),
     ],
   });
-  return cap!;
 }
 
 /**
  * Append `audit_example::audit_v2::attest_audit_v2(registry, subject, score,
  * report_url, requires)` to `tx`. `requires` is the list of attestation ids
- * this audit is conditional on (the `requires` convention). Returns the
- * `RevocationCap<AuditV2>` move-call result.
+ * this audit is conditional on (the `requires` convention).
  *
  * `auditExamplePkg` must be the *upgraded* (v2) package id, since that is
- * where the `audit_v2` module is defined.
+ * where the `audit_v2` module is defined. Returns nothing (revoked via the
+ * shared `AuditAdminCap`).
  */
 export function attestAuditV2Tx(
   tx: Transaction,
@@ -46,8 +45,8 @@ export function attestAuditV2Tx(
     reportUrl: string;
     requires: string[];
   },
-): TransactionObjectArgument {
-  const [cap] = tx.moveCall({
+): void {
+  tx.moveCall({
     target: `${args.auditExamplePkg}::audit_v2::attest_audit_v2`,
     arguments: [
       tx.object(args.registryId),
@@ -58,7 +57,31 @@ export function attestAuditV2Tx(
       tx.pure.vector('address', args.requires),
     ],
   });
-  return cap!;
+}
+
+/**
+ * Append `audit_example::audit::revoke_audit(admin, box, rcv)` to `tx` — the
+ * admin-cap revocation policy: a holder of the `AuditAdminCap` revokes any
+ * `Attestation<Audit>`. `auditExamplePkg` may be any version that defines the
+ * `audit` module (the type and policy are stable across the upgrade).
+ */
+export function revokeAuditTx(
+  tx: Transaction,
+  args: {
+    auditExamplePkg: string;
+    adminCapId: string;
+    boxId: string;
+    attestationRef: { objectId: string; version: string; digest: string };
+  },
+): void {
+  tx.moveCall({
+    target: `${args.auditExamplePkg}::audit::revoke_audit`,
+    arguments: [
+      tx.object(args.adminCapId),
+      tx.object(args.boxId),
+      tx.receivingRef(args.attestationRef),
+    ],
+  });
 }
 
 /**

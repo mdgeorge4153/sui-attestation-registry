@@ -12,7 +12,9 @@ module audit_example::audit_v2;
 
 use std::string::String;
 use sui::display_registry::DisplayRegistry;
-use attestation_registry::attestation_registry::{Self, Registry, RevocationCap};
+use sui::transfer::Receiving;
+use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
+use audit_example::audit::AuditAdminCap;
 
 /// V2 audit payload: adds a report link and a `requires` dependency list.
 public struct AuditV2 has store, drop {
@@ -53,7 +55,7 @@ public fun register_audit_v2_display(
 }
 
 /// Issue an AuditV2 attestation about `subject`, conditional on `requires`.
-/// Returns the revocation cap.
+/// Revocable via `revoke_audit_v2` (same `AuditAdminCap` as v1 audits).
 public fun attest_audit_v2(
     registry: &Registry,
     subject: ID,
@@ -61,13 +63,23 @@ public fun attest_audit_v2(
     report_url: String,
     requires: vector<ID>,
     ctx: &mut TxContext,
-): RevocationCap<AuditV2> {
+) {
     attestation_registry::attest<AuditV2>(
         registry,
         subject,
         AuditV2 { score, report_url, requires },
         ctx,
-    )
+    );
+}
+
+/// Revoke an `Attestation<AuditV2>`, reusing the auditor's `AuditAdminCap`
+/// (one authority covers every audit type this package defines).
+public fun revoke_audit_v2(
+    _: &AuditAdminCap,
+    box: &mut Box,
+    rcv: Receiving<Attestation<AuditV2>>,
+) {
+    attestation_registry::revoke<AuditV2>(box, std::internal::permit<AuditV2>(), rcv);
 }
 
 /// The numeric audit score.
@@ -91,16 +103,17 @@ public struct InternalNote has store, drop {
 
 /// Issue an InternalNote attestation. No Display is registered for
 /// `Attestation<InternalNote>`, so Display-gating consumers ignore it.
+/// Unrevocable — this schema exposes no revoke wrapper (negative test data).
 public fun attest_internal_note(
     registry: &Registry,
     subject: ID,
     text: String,
     ctx: &mut TxContext,
-): RevocationCap<InternalNote> {
+) {
     attestation_registry::attest<InternalNote>(
         registry,
         subject,
         InternalNote { text },
         ctx,
-    )
+    );
 }

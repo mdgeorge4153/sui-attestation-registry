@@ -10,7 +10,6 @@ use attestation_registry::attestation_registry::{
     Attestation,
     EBoxAlreadyExists,
     EBoxDoesNotExist,
-    ERevokeMismatch,
 };
 
 const ALICE: address = @0xA11CE;
@@ -60,15 +59,12 @@ fun test_attest_aborts_when_box_missing() {
 
     scenario.next_tx(ALICE);
     let registry: Registry = scenario.take_shared();
-    let cap = attestation_registry::attest<TestSchema>(
+    attestation_registry::attest<TestSchema>(
         &registry,
         subject,
         TestSchema { tag: 1 },
-
         scenario.ctx(),
     );
-    // unreachable; satisfy the move borrow checker
-    transfer::public_transfer(cap, @0x0);
     test_scenario::return_shared(registry);
     scenario.end();
 }
@@ -79,14 +75,12 @@ fun test_attest_and_read() {
     let mut scenario = setup_with_box(subject);
 
     let registry: Registry = scenario.take_shared();
-    let cap = attestation_registry::attest<TestSchema>(
+    attestation_registry::attest<TestSchema>(
         &registry,
         subject,
         TestSchema { tag: 42 },
-
         scenario.ctx(),
     );
-    transfer::public_transfer(cap, ALICE);
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
@@ -114,16 +108,14 @@ fun test_reissuance_succeeds() {
     let mut scenario = setup_with_box(subject);
 
     let registry: Registry = scenario.take_shared();
-    let cap1 = attestation_registry::attest<TestSchema>(
+    attestation_registry::attest<TestSchema>(
         &registry, subject, TestSchema { tag: 1 },
         scenario.ctx(),
     );
-    let cap2 = attestation_registry::attest<TestSchema>(
+    attestation_registry::attest<TestSchema>(
         &registry, subject, TestSchema { tag: 2 },
         scenario.ctx(),
     );
-    transfer::public_transfer(cap1, ALICE);
-    transfer::public_transfer(cap2, ALICE);
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
@@ -143,11 +135,10 @@ fun test_revoke_flips_is_active() {
     let mut scenario = setup_with_box(subject);
 
     let registry: Registry = scenario.take_shared();
-    let cap = attestation_registry::attest<TestSchema>(
+    attestation_registry::attest<TestSchema>(
         &registry, subject, TestSchema { tag: 7 },
         scenario.ctx(),
     );
-    transfer::public_transfer(cap, ALICE);
     test_scenario::return_shared(registry);
 
     // Pre-revoke borrow: read shows active=true.
@@ -163,12 +154,12 @@ fun test_revoke_flips_is_active() {
     attestation_registry::put_back_for_testing(&mut box, a);
     test_scenario::return_shared(box);
 
-    // Revoke.
+    // Revoke. The test module defines `TestSchema`, so it can mint the
+    // `Permit<TestSchema>` the registry's `revoke` requires.
     scenario.next_tx(ALICE);
     let mut box: Box = scenario.take_shared();
-    let cap = scenario.take_from_sender();
     let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
-    attestation_registry::revoke<TestSchema>(&mut box, cap, rcv, scenario.ctx());
+    attestation_registry::revoke<TestSchema>(&mut box, std::internal::permit<TestSchema>(), rcv);
     test_scenario::return_shared(box);
 
     // Post-revoke: read shows active=false.
@@ -183,39 +174,10 @@ fun test_revoke_flips_is_active() {
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = ERevokeMismatch)]
-fun test_revoke_with_wrong_cap_aborts() {
-    let subject = subject_for(@0xDEAD);
-    let mut scenario = setup_with_box(subject);
-
-    let registry: Registry = scenario.take_shared();
-    let cap_a = attestation_registry::attest<TestSchema>(
-        &registry, subject, TestSchema { tag: 1 },
-        scenario.ctx(),
-    );
-    let cap_b = attestation_registry::attest<TestSchema>(
-        &registry, subject, TestSchema { tag: 2 },
-        scenario.ctx(),
-    );
-    transfer::public_transfer(cap_a, ALICE);
-    transfer::public_transfer(cap_b, @0x0);
-    test_scenario::return_shared(registry);
-
-    scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
-    let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
-        object::id(&box),
-    );
-    // Pair cap_a with attestation B's receiving ticket — must abort ERevokeMismatch.
-    let id_b = ids[1];
-    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id_b);
-    let cap_a = scenario.take_from_sender();
-    attestation_registry::revoke<TestSchema>(&mut box, cap_a, rcv, scenario.ctx());
-
-    // unreachable
-    test_scenario::return_shared(box);
-    scenario.end();
-}
+// Revocation authority is no longer the base registry's concern (it gates
+// `revoke` on `Permit<T>` and leaves the policy to the schema), so the
+// per-attestation cap-mismatch test now lives with the schema that
+// reconstructs that bearer-cap policy — see `vuln_tests`.
 
 // `register_display` cannot be unit-tested here: it needs the system
 // `DisplayRegistry` (shared at `0xd`), and the only way to create one in tests

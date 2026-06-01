@@ -16,10 +16,6 @@ const EBoxAlreadyExists: vector<u8> =
 const EBoxDoesNotExist: vector<u8> =
     b"No Box exists for this subject; call create_box first";
 
-#[error(code = 2)]
-const ERevokeMismatch: vector<u8> =
-    b"RevocationCap doesn't match the attestation being revoked";
-
 /// Shared singleton, parent UID for every per-subject `Box`.
 public struct Registry has key {
     id: UID,
@@ -52,17 +48,6 @@ public struct Attestation<T: store> has key {
     subject: ID,
     data: T,
     active: bool,
-}
-
-/// Bearer-token authority to revoke a single `Attestation<T>`. Returned by
-/// `attest` and consumed by `revoke`. Holding the cap *is* the authorization
-/// — there is no separate sender check.
-///
-/// To commit irrevocably, transfer the cap to `@0x0` (or any other unspendable
-/// address). To delegate, transfer to a multisig or another address.
-public struct RevocationCap<phantom T> has key, store {
-    id: UID,
-    attestation_id: ID,
 }
 
 /// Emitted by every `attest` call. Indexers filter by the phantom `T`
@@ -124,16 +109,18 @@ public fun attester_of<T>(): address { type_name::original_id<T>() }
 
 /// Attest about `subject` (under `registry`) with `data`. The caller must
 /// produce a `T` value, which Move's construction rules already restrict to
-/// `T`'s defining package — that's the property `attester_of<T>()` records
-/// (no separate `Permit<T>` needed). Aborts `EBoxDoesNotExist` if no Box
-/// exists for this subject (call `create_box` first). Returns a
-/// `RevocationCap<T>` for later revocation.
+/// `T`'s defining package — that's the property `attester_of<T>()` records.
+/// Aborts `EBoxDoesNotExist` if no Box exists for this subject (call
+/// `create_box` first). Returns the new attestation's `ID`, the one piece a
+/// schema can't otherwise recover (the object goes straight to the Box), so
+/// it can build whatever revocation authority it wants — a bearer cap bound
+/// to this id, an admin-gated revoke, or none at all.
 public fun attest<T: store>(
     registry: &Registry,
     subject: ID,
     data: T,
     ctx: &mut TxContext,
-): RevocationCap<T> {
+): ID {
     assert!(derived_object::exists(&registry.id, subject), EBoxDoesNotExist);
     let box_addr = derived_object::derive_address(object::id(registry), subject);
     let attestation = Attestation<T> {
@@ -145,21 +132,22 @@ public fun attest<T: store>(
     let attestation_id = object::id(&attestation);
     event::emit(Attested<T> { subject });
     transfer::transfer(attestation, box_addr);
-    RevocationCap<T> { id: object::new(ctx), attestation_id }
+    attestation_id
 }
 
-/// Revoke the attestation referenced by `rcv`. Aborts `ERevokeMismatch` if
-/// the receiving ticket and the `RevocationCap` reference different
-/// attestations.
+/// Revoke the attestation referenced by `rcv`: flip its `active` flag to
+/// false and re-transfer it to the owning Box. `rcv` alone identifies which
+/// attestation, so no id check is needed here.
+///
+/// Gated by `Permit<T>`: only `T`'s defining module can mint one, so the
+/// *policy* for who may revoke (a bearer cap, an admin cap, a multisig, …)
+/// lives in that module, while the state transition and `Revoked<T>` event
+/// stay uniform here — the same split as `register_display`.
 public fun revoke<T: store>(
     box: &mut Box,
-    cap: RevocationCap<T>,
+    _: Permit<T>,
     rcv: Receiving<Attestation<T>>,
-    _ctx: &TxContext,
 ) {
-    let RevocationCap { id: cap_uid, attestation_id: cap_id } = cap;
-    object::delete(cap_uid);
-    assert!(transfer::receiving_object_id(&rcv) == cap_id, ERevokeMismatch);
     let mut a = transfer::receive(&mut box.id, rcv);
     a.active = false;
     event::emit(Revoked<T> { subject: a.subject });

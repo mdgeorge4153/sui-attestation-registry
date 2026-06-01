@@ -42,9 +42,9 @@ import {
   createBoxTx,
   attestAuditTx,
   attestAuditV2Tx,
+  revokeAuditTx,
   auditAttestationType,
   auditV2AttestationType,
-  revokeTx,
   listAttestations,
   getAttestation,
   isEffective,
@@ -154,6 +154,20 @@ function oneOf(ok: TxOk, type: string, label: string): string {
   return ids[0]!;
 }
 
+/** The single object of `type` owned by `owner`, or throw if not exactly one. */
+async function findOwnedObject(
+  client: ReturnType<typeof makeClient>,
+  owner: string,
+  type: string,
+): Promise<string> {
+  const page = await client.listOwnedObjects({ owner, type });
+  const ids = page.objects.map((o) => o.objectId);
+  if (ids.length !== 1) {
+    throw new Error(`expected exactly 1 ${type} owned by ${owner}, got ${ids.length}`);
+  }
+  return ids[0]!;
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -179,7 +193,10 @@ async function main(): Promise<void> {
     attestationRegistryPkg: pkgs.attestationRegistry,
     auditExamplePkg: pkgs.auditExampleOriginal,
   });
-  const auditCapType = `${pkgs.attestationRegistry}::attestation_registry::RevocationCap<${pkgs.auditExampleOriginal}::audit::Audit>`;
+  // The auditor's single-party revocation authority, created at publish and
+  // owned by the publisher (sender). Type uses the *original* id (where the
+  // `audit` module — and thus `AuditAdminCap` — is defined).
+  const adminCapType = `${pkgs.auditExampleOriginal}::audit::AuditAdminCap`;
   const auditV2Type = auditV2AttestationType({
     attestationRegistryPkg: pkgs.attestationRegistry,
     auditExamplePkg: pkgs.auditExample,
@@ -204,15 +221,12 @@ async function main(): Promise<void> {
   console.log('\n▶ TX 2 — attest_audit on dependency (score=90, will be revoked)');
   let depAuditId: string;
   let depAuditRef: { objectId: string; version: string; digest: string };
-  let depAuditCap: string;
   {
     const tx = new Transaction();
-    const cap = attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject: dependency, score: 90, reportUrl: 'https://audits.example.com/dependency-v1.pdf' });
-    tx.transferObjects([cap], sender);
+    attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject: dependency, score: 90, reportUrl: 'https://audits.example.com/dependency-v1.pdf' });
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
     depAuditId = oneOf(ok, auditType, 'Attestation<Audit>');
-    depAuditCap = oneOf(ok, auditCapType, 'RevocationCap<Audit>');
     depAuditRef = ok.createdRefs.get(depAuditId)!;
   }
 
@@ -239,7 +253,7 @@ async function main(): Promise<void> {
   let subjectAuditId: string;
   {
     const tx = new Transaction();
-    const cap = attestAuditV2Tx(tx, {
+    attestAuditV2Tx(tx, {
       auditExamplePkg: pkgs.auditExample,
       registryId,
       subject,
@@ -247,7 +261,6 @@ async function main(): Promise<void> {
       reportUrl: 'https://audits.example.com/subject-v1.pdf',
       requires: [depAuditId],
     });
-    tx.transferObjects([cap], sender);
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
     subjectAuditId = oneOf(ok, auditV2Type, 'Attestation<AuditV2>');
@@ -256,8 +269,7 @@ async function main(): Promise<void> {
   console.log('\n▶ TX 3b — attest_audit on subject (score=88, stays effective)');
   {
     const tx = new Transaction();
-    const cap = attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject, score: 88, reportUrl: 'https://audits.example.com/subject-v1.pdf' });
-    tx.transferObjects([cap], sender);
+    attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject, score: 88, reportUrl: 'https://audits.example.com/subject-v1.pdf' });
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
   }
@@ -290,15 +302,14 @@ async function main(): Promise<void> {
   console.log('\n▶ TX 5 — attest_untrusted + attest_internal_note (both should be filtered out)');
   {
     const tx = new Transaction();
-    const [u] = tx.moveCall({
+    tx.moveCall({
       target: `${pkgs.untrustedExample}::untrusted::attest_untrusted`,
       arguments: [tx.object(registryId), tx.pure.id(subject), tx.pure.string('not whitelisted')],
     });
-    const [n] = tx.moveCall({
+    tx.moveCall({
       target: `${pkgs.auditExample}::audit_v2::attest_internal_note`,
       arguments: [tx.object(registryId), tx.pure.id(subject), tx.pure.string('no Display registered')],
     });
-    tx.transferObjects([u!, n!], sender);
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
   }
@@ -319,15 +330,15 @@ async function main(): Promise<void> {
 
   await reportEffective('Before revoke');
 
-  console.log('\n▶ TX 6 — revoke the dependency audit');
+  console.log('\n▶ TX 6 — revoke the dependency audit (via AuditAdminCap)');
   {
+    const adminCapId = await findOwnedObject(client, sender, adminCapType);
     const tx = new Transaction();
-    revokeTx(tx, {
-      attestationRegistryPkg: pkgs.attestationRegistry,
+    revokeAuditTx(tx, {
+      auditExamplePkg: pkgs.auditExample,
+      adminCapId,
       boxId: dependencyBox,
-      capId: depAuditCap,
       attestationRef: depAuditRef,
-      attestationType: `${pkgs.auditExampleOriginal}::audit::Audit`,
     });
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);

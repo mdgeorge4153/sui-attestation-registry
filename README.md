@@ -13,7 +13,7 @@ expressed as Display-field **conventions** rather than additional Move types.
 
 ```
 packages/
-  attestation_registry/       — core Move package: Registry, Box, Attestation, RevocationCap
+  attestation_registry/       — core Move package: Registry, Box, Attestation
   audit_example/              — sample schema: Audit { score: u8 }
   vuln_example/               — sample "negative" schema: Vulnerability { severity, cve_id, description }
 ts/
@@ -30,14 +30,16 @@ subject. The Box's address is `derived_object::derive_address(registry, subject)
 — computable off-chain — so consumers can enumerate every attestation about
 a subject via `getOwnedObjects(box_address, filter={StructType: …})`, with
 server-side type filtering. Each `Attestation<T>` is owned by its Box via
-transfer-to-object. Attestations are issued by `attestation_registry::attest`
-gated by `Permit<T>` (only `T`'s defining package can call it), so the
-recorded attester is `T`'s package — bound to the type at compile time, not
-denormalized into a field. Revocation is bearer-token: `attest` returns a
-`RevocationCap<T>` whose holder can flip the attestation's `active` flag via
-`revoke`. Time-based effectiveness (expiration), dependency relationships
-(`requires`), and other cross-cutting concerns sit in the Display layer per
-the conventions in `CONVENTIONS.md` — the registry itself stays minimal.
+transfer-to-object. Attestations are issued by `attestation_registry::attest`;
+constructing the `T` value it takes is already restricted by Move to `T`'s
+defining package, so the recorded attester is `T`'s package — bound to the
+type at compile time, not denormalized into a field. Revocation flips an
+attestation's `active` flag and is gated by `Permit<T>`, which only `T`'s
+package can mint — so each schema defines its own revocation authority (an
+admin cap, a per-attestation bearer cap, or none at all). Time-based
+effectiveness (expiration), dependency relationships (`requires`), and other
+cross-cutting concerns sit in the Display layer per the conventions in
+`CONVENTIONS.md` — the registry itself stays minimal.
 
 ## Building and testing
 

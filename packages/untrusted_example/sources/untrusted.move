@@ -7,7 +7,7 @@ module untrusted_example::untrusted;
 
 use std::string::String;
 use sui::display_registry::DisplayRegistry;
-use attestation_registry::attestation_registry::{Self, Registry, RevocationCap};
+use attestation_registry::attestation_registry::{Self, Registry};
 
 /// Payload of an attestation from an untrusted attester.
 public struct Untrusted has store, drop {
@@ -34,17 +34,18 @@ public fun register_untrusted_display(
     );
 }
 
-/// Issue an Untrusted attestation about `subject`.
+/// Issue an Untrusted attestation about `subject` (negative test data;
+/// unrevocable — no revoke wrapper exposed).
 public fun attest_untrusted(
     registry: &Registry,
     subject: ID,
     note: String,
     ctx: &mut TxContext,
-): RevocationCap<Untrusted> {
+) {
     attestation_registry::attest<Untrusted>(
         registry,
         subject,
         Untrusted { note },
         ctx,
-    )
+    );
 }
