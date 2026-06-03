@@ -5,13 +5,14 @@
 # demo can render attestations.
 #
 # Packages (publish order matters — deps before dependents):
-#   attestation_registry  -> shared Registry singleton (created in init)
-#   audit_example         -> Audit schema (later upgraded to add AuditV2)
-#   vuln_example          -> Vulnerability schema
-#   dependency_example    -> a subject, and a dependency of subject_example
-#   subject_example       -> the browsable subject (depends on dependency_example)
+#   packages/attestation_registry  -> shared Registry singleton (created in init)
+#   examples/audit_example         -> Audit schema (later upgraded to add AuditV2)
+#   examples/vuln_example          -> Vulnerability schema
+#   demo/dependency_example        -> a subject, and a dependency of subject_example
+#   demo/subject_example           -> the browsable subject (depends on dependency_example)
+#   demo/untrusted_example         -> attester not in the trusted set (filtered out)
 #
-# The AuditV2 schema lives in packages/audit_example/upgrade/audit_v2.move,
+# The AuditV2 schema lives in examples/audit_example/upgrade/audit_v2.move,
 # outside sources/ so it is absent from the initial publish. We copy it into
 # sources/ only for the upgrade step, so AuditV2's defining package id is the
 # *upgraded* id — exercising the schema-evolution path.
@@ -38,7 +39,7 @@ DISPLAY_REGISTRY=0xd
 GAS_BUDGET=100000000
 
 # The staged AuditV2 upgrade module and its transient location under sources/.
-AUDIT_DIR="$REPO_ROOT/packages/audit_example"
+AUDIT_DIR="$REPO_ROOT/examples/audit_example"
 AUDIT_V2_SRC="$AUDIT_DIR/upgrade/audit_v2.move"
 AUDIT_V2_STAGED="$AUDIT_DIR/sources/audit_v2.move"
 
@@ -84,18 +85,19 @@ import re, sys
 pubfile, target, field = sys.argv[1], sys.argv[2], sys.argv[3]
 content = open(pubfile).read()
 for block in content.split('[[published]]'):
-    if '/packages/' + target in block:
+    if '/' + target in block:
         m = re.search(field + r'\s*=\s*"([^"]+)"', block)
         if m:
             print(m.group(1)); break
 PY
 }
 
-for pkg in attestation_registry audit_example vuln_example dependency_example subject_example untrusted_example; do
+for pkg in packages/attestation_registry examples/audit_example examples/vuln_example demo/dependency_example demo/subject_example demo/untrusted_example; do
+    name=$(basename "$pkg")
     echo
-    echo "▶ test-publish $pkg"
+    echo "▶ test-publish $name"
     json_out=$(mktemp)
-    if ! (cd "$REPO_ROOT/packages/$pkg" \
+    if ! (cd "$REPO_ROOT/$pkg" \
             && "$SUI" client test-publish --build-env testnet --pubfile-path "$PUBFILE" --gas-budget "$GAS_BUDGET" --json) \
             > "$json_out" 2>&1; then
         echo "  FAILED. Output:"
@@ -104,7 +106,7 @@ for pkg in attestation_registry audit_example vuln_example dependency_example su
         exit 1
     fi
     echo "  ok"
-    if [[ "$pkg" == "attestation_registry" ]]; then
+    if [[ "$name" == "attestation_registry" ]]; then
         json=$(extract_json "$json_out" || true)
         if [[ -n "$json" ]]; then
             REGISTRY_ID=$(python3 -c "

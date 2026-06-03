@@ -13,12 +13,18 @@ expressed as Display-field **conventions** rather than additional Move types.
 
 ```
 packages/
-  attestation_registry/       — core Move package: Registry, Box, Attestation
-  audit_example/              — sample schema: Audit { score: u8 }
+  attestation_registry/       — the only deployable: Registry, Box, Attestation
+examples/                     — reusable schema patterns for third-party attesters
+  audit_example/              — sample schema: Audit { score: u8 } (+ AuditV2 upgrade)
   vuln_example/               — sample "negative" schema: Vulnerability { severity, cve_id, description }
+demo/                         — fixtures that exist only to drive the local demo
+  dependency_example/         — a subject; dependency of subject_example
+  subject_example/            — the browsed subject (depends on dependency_example)
+  untrusted_example/          — an attester deliberately NOT in the trusted set
 ts/
-  lib/                        — TypeScript library: query helpers, PTB builders, conventions evaluator
-  demo.ts                     — end-to-end CLI exercising the lifecycle
+  src/                        — client SDK: Box derivation, queries, conventions evaluator
+  examples/audit.ts           — auditor-side PTB builders for the audit_example schema
+  demo/                       — end-to-end CLI + dev tooling
 CONVENTIONS.md                — Display-field conventions (expires_at, requires, …)
 FUTURE-EXTENSIONS.md          — design memos for surfaces deliberately deferred from v0
 ```
@@ -48,8 +54,8 @@ directory:
 
 ```bash
 cd packages/attestation_registry && sui move test
-cd packages/audit_example       && sui move test
-cd packages/vuln_example        && sui move test
+cd examples/audit_example        && sui move test
+cd examples/vuln_example         && sui move test
 ```
 
 You'll need a `sui` CLI new enough to support the `#[error(code = …)]`

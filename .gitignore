@@ -8,8 +8,8 @@ ts/dist/
 
 # Transient copy of the AuditV2 upgrade module, staged into sources/ by
 # scripts/test-publish.sh only for the upgrade step. Canonical copy lives in
-# packages/audit_example/upgrade/audit_v2.move.
-packages/audit_example/sources/audit_v2.move
+# examples/audit_example/upgrade/audit_v2.move.
+examples/audit_example/sources/audit_v2.move
 
 # Machine-readable demo output (registry id, subject, attester ids) consumed
 # by the MVR Postgres seeder.
