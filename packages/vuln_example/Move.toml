@@ -1,6 +1,0 @@
-[package]
-name = "vuln_example"
-edition = "2024"
-
-[dependencies]
-attestation_registry = { local = "../attestation_registry" }
