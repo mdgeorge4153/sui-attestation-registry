@@ -36,25 +36,27 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { fromBase64, normalizeSuiAddress } from '@mysten/sui/utils';
 
 import {
-  makeClient,
-  readPubfile,
   boxAddress,
   createBoxTx,
+  listAttestations,
+  getAttestation,
+  isEffective,
+  type AttestationInfo,
+} from '../src/index.js';
+import {
   attestAuditTx,
   attestAuditV2Tx,
   revokeAuditTx,
   auditAttestationType,
   auditV2AttestationType,
-  listAttestations,
-  getAttestation,
-  isEffective,
-  type AttestationInfo,
-  type PublishedPackages,
-} from './lib/index.js';
+} from '../examples/audit.js';
+import { makeClient } from './client.js';
+import { readPubfile, type PublishedPackages } from './pubfile.js';
 
 const KEYSTORE_PATH = join(homedir(), '.sui', 'sui_config', 'sui.keystore');
-const DEFAULT_PUBFILE_PATH = join(import.meta.dirname, '..', 'Pub.localnet.toml');
-const DEMO_IDS_PATH = join(import.meta.dirname, '..', 'demo-ids.json');
+// demo.ts lives in ts/demo/, so repo root is two levels up.
+const DEFAULT_PUBFILE_PATH = join(import.meta.dirname, '..', '..', 'Pub.localnet.toml');
+const DEMO_IDS_PATH = join(import.meta.dirname, '..', '..', 'demo-ids.json');
 const DEFAULT_RPC = 'http://127.0.0.1:9000';
 
 function loadKeypair(): Ed25519Keypair {
