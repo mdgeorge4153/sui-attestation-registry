@@ -40,10 +40,12 @@ Key threads:
   discoverability.
 - **Authorization** moved from sender-keyed to a `*Cap` pattern.
 
-This PoC was built on the same underlying primitives the PR converged on
-(derived addresses, bearer revocation, cap-based authorization). The
-remaining differences are in choices that *still* divide the two designs
-after the PR discussion ended.
+This PoC was built on the storage primitive the PR converged on (derived
+addresses). It diverges on revocation and authorization: rather than bake a
+bearer cap into the core, the registry gates state changes with `Permit<T>`
+and leaves revocation *policy* to the schema (see #8). The remaining
+differences are in choices that *still* divide the two designs after the PR
+discussion ended.
 
 ## What this PoC adopts from the PR-evolved SIP-56
 
@@ -55,10 +57,6 @@ after the PR discussion ended.
 - **Receive / modify / re-transfer pattern** for in-place state changes.
   Revocation in this PoC works exactly this way: the registry receives the
   attestation from its Box, flips `active` to false, and re-transfers it.
-- **Bearer-cap revocation**. `attest` returns `RevocationCap<T>`. Any
-  attestation can be revoked; permanent commitments are expressed by
-  transferring the cap to `@0x0` instead of by encoding (non-)revocability
-  in the type.
 
 These are the load-bearing improvements that came out of the SIP-56 PR
 discussion, and both designs build on them.
@@ -149,7 +147,7 @@ public struct UserAudit has store, drop {
 
 public fun attest_user_audit(
     registry: &Registry, subject: ID, score: u8, ctx: &mut TxContext,
-): RevocationCap<UserAudit> {
+): ID {
     attestation_registry::attest<UserAudit>(
         registry,
         subject,
@@ -284,9 +282,29 @@ same "two sources of truth" hazard as the event-field case. The
 `active: bool` shape is also less surface area than `Option<address>`
 for the common "is this still effective" check.
 
+### 8. Revocation policy lives in the schema, not the core
+
+SIP-56 (post-PR) bakes a universal bearer `RevokeCap` into the registry.
+This PoC keeps the core policy-free: `revoke<T>(box, _: Permit<T>, rcv)` is
+gated only by `Permit<T>` — which only `T`'s defining module can mint — and
+performs a uniform state transition (`active = false`) plus a `Revoked<T>`
+event. It mints no cap. `attest<T>` returns the new attestation's `ID`, the
+one fact a schema can't otherwise recover, so the schema can build whatever
+revocation authority it wants: a bearer cap bound to that id, an admin cap,
+a multisig, or none.
+
+**Why this is an improvement**: the registry shouldn't dictate revocation
+policy — the party that defines what an attestation *means* (the schema
+package) should. This is the same `Permit<T>` split already used for
+`register_display`: the core owns the mechanism, the schema owns the policy.
+Permanent commitments are expressed by a schema simply not exposing a revoke
+path — no "transfer the cap to `@0x0`" anti-pattern needed.
+
 ## What we gained
 
 - **Bytecode-verifiable attester identity** via `Permit<T>` gating.
+- **Policy-free core revocation**: schemas pick their own revocation
+  authority (bearer cap, admin, multisig, or immutable) via `Permit<T>`.
 - **Type-filtered native RPC enumeration** for the dominant access
   pattern ("all attestations about subject S") and for cross-subject
   type filters ("all Audit attestations" globally).
@@ -313,10 +331,10 @@ plays out in this PoC:
 |---|---|---|
 | Curated vs. discoverable types | Stayed with curated + on-chain `AttestationType<T>` | Removed; type discoverability off-chain |
 | Scope: minimum viable attestations | Broad agreement on minimal scope | Adopted |
-| Revocation (per-type vs. universal) | Universal via `RevokeCap` | Adopted (`RevocationCap<T>`) |
+| Revocation (per-type vs. universal) | Universal via `RevokeCap` | Diverged: policy-free core gated by `Permit<T>`; revocation policy lives in the schema |
 | Pinning: hide vs. highlight | Switched to highlight | Removed entirely (consumer concern) |
 | Modifying attestations | Receive-modify-retransfer via derived addresses | Adopted (in `revoke`) |
-| Authorization scheme | Sender → `*Cap` pattern | Adopted (`RevocationCap<T>`) |
+| Authorization scheme | Sender → `*Cap` pattern | Diverged: `Permit<T>` gating (schema chooses cap / admin / multisig) |
 | Display immutability | Frozen `AttestationType<T>` wraps `DisplayCap` | Same freeze-a-wrapper mechanism (`DisplayLock<T>`) |
 | Self-discoverable types | Frontends fetch list via on-chain `AttestationType<T>` | Off-chain via event subscription |
 | Derived addresses timeline | Acknowledged as months out; PoC initially worked around it | This PoC is built directly on them |
