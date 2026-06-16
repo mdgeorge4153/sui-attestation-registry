@@ -16,10 +16,9 @@ public struct Audit has store, drop {
 
 /// Single-party revocation authority: whoever holds this cap can revoke *any*
 /// `Attestation<Audit>` (and `AuditV2`) from this auditor. Created once at
-/// publish and transferred to the publisher. Contrast `vuln_example`, which
-/// reconstructs a per-attestation bearer cap — the base registry prescribes
-/// neither; each schema picks its policy and supplies the `Permit` the
-/// registry's `revoke` requires.
+/// publish and transferred to the publisher. This is one revocation-policy
+/// choice among many — the base registry prescribes none; each schema picks
+/// its own and supplies the `Permit` the registry's `revoke` requires.
 public struct AuditAdminCap has key, store {
     id: UID,
 }
@@ -42,13 +41,11 @@ public fun register_audit_display(
             name_field(),
             description_field(),
             b"link".to_string(),
-            b"polarity".to_string(),
         ],
         vector[
             b"Audit attestation".to_string(),
             b"Score: {data.score}/100".to_string(),
             b"{data.report_url}".to_string(),
-            b"positive".to_string(),
         ],
         std::internal::permit<Audit>(),
         ctx,

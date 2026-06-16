@@ -181,9 +181,9 @@ fun test_revoke_moves_attestation_to_sink() {
 }
 
 // Revocation authority is no longer the base registry's concern (it gates
-// `revoke` on `Permit<T>` and leaves the policy to the schema), so the
-// per-attestation cap-mismatch test now lives with the schema that
-// reconstructs that bearer-cap policy — see `vuln_tests`.
+// `revoke` on `Permit<T>` and leaves the policy to the schema), so any
+// per-attestation cap-mismatch policy is tested by the schema that
+// reconstructs that bearer-cap pattern, not here.
 
 // `register_display` cannot be unit-tested here: it needs the system
 // `DisplayRegistry` (shared at `0xd`), and the only way to create one in tests

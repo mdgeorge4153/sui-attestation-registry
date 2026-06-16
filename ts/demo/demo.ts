@@ -4,7 +4,7 @@
  *     `subject_example` (which depends on it)
  *   - audit the dependency (Attestation<Audit>, v1 schema)
  *   - audit the subject with AuditV2 (the upgrade-added schema) that `requires`
- *     the dependency's audit, plus a Vulnerability attestation
+ *     the dependency's audit
  *   - list + pretty-print the attestations with their Display rendering
  *   - evaluate the subject audit's *effectiveness* (transitive `requires`)
  *   - revoke the dependency's audit, and show the subject audit flip to
@@ -232,25 +232,6 @@ async function main(): Promise<void> {
     depAuditRef = ok.createdRefs.get(depAuditId)!;
   }
 
-  console.log('\n▶ TX 2b — attest_vuln on dependency (effective; should propagate to subject)');
-  {
-    const tx = new Transaction();
-    const [cap] = tx.moveCall({
-      target: `${pkgs.vulnExample}::vuln::attest_vuln`,
-      arguments: [
-        tx.object(registryId),
-        tx.pure.id(dependency),
-        tx.pure.u8(7),
-        tx.pure.string('CVE-2026-0042'),
-        tx.pure.string('Heap overflow in the dependency'),
-        tx.pure.string('https://scanner.example.com/CVE-2026-0042'),
-      ],
-    });
-    tx.transferObjects([cap!], sender);
-    const ok = await exec(client, signer, tx);
-    console.log(`  digest: ${ok.digest}`);
-  }
-
   console.log('\n▶ TX 3 — attest_audit_v2 on subject (score=95, requires dependency audit)');
   let subjectAuditId: string;
   {
@@ -276,32 +257,10 @@ async function main(): Promise<void> {
     console.log(`  digest: ${ok.digest}`);
   }
 
-  console.log('\n▶ TX 4 — attest_vuln on subject (severity=4)');
-  let subjectVulnId: string;
-  {
-    const tx = new Transaction();
-    const [cap] = tx.moveCall({
-      target: `${pkgs.vulnExample}::vuln::attest_vuln`,
-      arguments: [
-        tx.object(registryId),
-        tx.pure.id(subject),
-        tx.pure.u8(4),
-        tx.pure.string('CVE-2026-0001'),
-        tx.pure.string('Example informational finding'),
-        tx.pure.string('https://scanner.example.com/CVE-2026-0001'),
-      ],
-    });
-    tx.transferObjects([cap!], sender);
-    const ok = await exec(client, signer, tx);
-    console.log(`  digest: ${ok.digest}`);
-    const vulnType = `${pkgs.attestationRegistry}::attestation_registry::Attestation<${pkgs.vulnExample}::vuln::Vulnerability>`;
-    subjectVulnId = oneOf(ok, vulnType, 'Attestation<Vulnerability>');
-  }
-
   // Negative test data: two attestations a trust consumer must filter out — one
   // from an untrusted attester (filtered on the package), one of a trusted
   // package's type with no registered Display (filtered on the Display-gate).
-  console.log('\n▶ TX 5 — attest_untrusted + attest_internal_note (both should be filtered out)');
+  console.log('\n▶ TX 4 — attest_untrusted + attest_internal_note (both should be filtered out)');
   {
     const tx = new Transaction();
     tx.moveCall({
@@ -332,7 +291,7 @@ async function main(): Promise<void> {
 
   await reportEffective('Before revoke');
 
-  console.log('\n▶ TX 6 — revoke the dependency audit (via AuditAdminCap)');
+  console.log('\n▶ TX 5 — revoke the dependency audit (via AuditAdminCap)');
   {
     const adminCapId = await findOwnedObject(client, sender, adminCapType);
     const tx = new Transaction();
@@ -355,12 +314,10 @@ async function main(): Promise<void> {
     subjects: { subject, dependency },
     trustedAttestors: [
       { name: 'audit_example', originalId: pkgs.auditExampleOriginal, latestId: pkgs.auditExample },
-      { name: 'vuln_example', originalId: pkgs.vulnExample, latestId: pkgs.vulnExample },
     ],
     createdAttestations: {
       dependencyAudit: depAuditId,
       subjectAuditV2: subjectAuditId,
-      subjectVuln: subjectVulnId,
     },
   };
   writeFileSync(DEMO_IDS_PATH, JSON.stringify(demoIds, null, 2) + '\n');

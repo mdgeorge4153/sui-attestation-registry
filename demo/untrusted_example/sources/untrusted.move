@@ -23,11 +23,10 @@ public fun register_untrusted_display(
 ) {
     attestation_registry::register_display<Untrusted>(
         display_registry,
-        vector[b"name".to_string(), b"description".to_string(), b"polarity".to_string()],
+        vector[b"name".to_string(), b"description".to_string()],
         vector[
             b"Untrusted attestation".to_string(),
             b"{data.note}".to_string(),
-            b"positive".to_string(),
         ],
         std::internal::permit<Untrusted>(),
         ctx,

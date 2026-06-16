@@ -85,54 +85,6 @@ Schemas that need acyclicity should enforce it at issue time (e.g., by
 checking that none of the targets transitively reference the new attestation
 before issuing).
 
-### `polarity`
-
-Distinguishes **positive** attestations (an assertion of good standing — e.g.
-an audit) from **negative** ones (an assertion of a problem — e.g. a
-vulnerability disclosure). The field renders the literal string `positive` or
-`negative`; absence defaults to `positive`.
-
-```move
-fields.push_back(b"polarity".to_string());
-values.push_back(b"positive".to_string()); // or b"negative"
-```
-
-Polarity is a fixed property of the schema, so the template hardcodes it
-rather than reading `data`.
-
-Consumers use it to render the two kinds differently and — for negatives — to
-**propagate**: a negative attestation that is effective on a package is
-surfaced on that package's *dependents* (transitively, via the dependency
-graph), so a vulnerability in a dependency shows up when browsing anything
-that depends on it. Propagation is the negative-polarity dual of `requires`:
-`requires` is an explicit, per-attestation link pulling toward the dependency;
-propagation is implicit and graph-derived, pushing toward dependents. A
-revoked or expired negative attestation does not propagate.
-
-### `severity`
-
-A severity score for negative attestations, reusing **CVSS** (the Common
-Vulnerability Scoring System): a base score from `0.0` to `10.0`. Consumers
-sort negatives by it (most severe first) and map it to the standard CVSS v3.1
-qualitative bands for display:
-
-| Band | Score |
-|------|-------|
-| None | 0.0 |
-| Low | 0.1–3.9 |
-| Medium | 4.0–6.9 |
-| High | 7.0–8.9 |
-| Critical | 9.0–10.0 |
-
-```move
-fields.push_back(b"severity".to_string());
-values.push_back(b"{data.severity}".to_string());
-```
-
-The field renders the raw number so it is machine-sortable; the consumer
-formats it (e.g. `7 · High`). A schema using integer scores (`0`–`10`) is a
-valid subset. Absence means unscored.
-
 ## Presentation fields
 
 These don't affect effectiveness; they're how an attestation renders. They
@@ -143,8 +95,8 @@ consumers.
 - **`name`** — short title (e.g. `b"Audit attestation"`).
 - **`description`** — human-readable summary; may interpolate `data`
   (e.g. `b"Score: {data.score}/100"`).
-- **`image_url`** — an image for the attestation: a grade badge, severity
-  glyph, report thumbnail, etc.
+- **`image_url`** — an image for the attestation: a grade badge, report
+  thumbnail, etc.
 - **`link`** — a URL to the full artifact (the audit report, the CVE record).
 
 ```move

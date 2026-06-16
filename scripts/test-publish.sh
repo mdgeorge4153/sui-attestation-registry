@@ -7,7 +7,6 @@
 # Packages (publish order matters — deps before dependents):
 #   packages/attestation_registry  -> shared Registry singleton (created in init)
 #   examples/audit_example         -> Audit schema (later upgraded to add AuditV2)
-#   examples/vuln_example          -> Vulnerability schema
 #   demo/dependency_example        -> a subject, and a dependency of subject_example
 #   demo/subject_example           -> the browsable subject (depends on dependency_example)
 #   demo/untrusted_example         -> attester not in the trusted set (filtered out)
@@ -92,7 +91,7 @@ for block in content.split('[[published]]'):
 PY
 }
 
-for pkg in packages/attestation_registry examples/audit_example examples/vuln_example demo/dependency_example demo/subject_example demo/untrusted_example; do
+for pkg in packages/attestation_registry examples/audit_example demo/dependency_example demo/subject_example demo/untrusted_example; do
     name=$(basename "$pkg")
     echo
     echo "▶ test-publish $name"
@@ -143,13 +142,11 @@ echo "  ok"
 # After the upgrade, audit_example's published-at is the v2 id (which defines
 # both the `audit` and `audit_v2` modules); original-id is unchanged.
 PKG_AUDIT=$(parse_pkg_field audit_example published-at)
-PKG_VULN=$(parse_pkg_field vuln_example published-at)
 PKG_UNTRUSTED=$(parse_pkg_field untrusted_example published-at)
 
-if [[ -z "$PKG_AUDIT" ]] || [[ -z "$PKG_VULN" ]]; then
+if [[ -z "$PKG_AUDIT" ]]; then
     echo "could not resolve package addresses from $PUBFILE — skipping display registration"
     echo "PKG_AUDIT=$PKG_AUDIT"
-    echo "PKG_VULN=$PKG_VULN"
 else
     register_display() {
         local label="$1" pkg="$2" module="$3" func="$4"
@@ -168,7 +165,6 @@ else
 
     register_display register_audit_display     "$PKG_AUDIT"     audit      register_audit_display
     register_display register_audit_v2_display  "$PKG_AUDIT"     audit_v2   register_audit_v2_display
-    register_display register_vuln_display      "$PKG_VULN"      vuln       register_vuln_display
     register_display register_untrusted_display "$PKG_UNTRUSTED" untrusted  register_untrusted_display
 fi
 

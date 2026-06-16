@@ -9,7 +9,6 @@ export interface PublishedPackages {
   /** audit_example's `original-id`. The defining id for the v1 `Audit` type,
    *  which keeps the original id across the upgrade. */
   auditExampleOriginal: string;
-  vulnExample: string;
   subjectExample: string;
   dependencyExample: string;
   untrustedExample: string;
@@ -59,7 +58,6 @@ export function readPubfile(path: string): PublishedPackages {
     attestationRegistry: find('attestation_registry').publishedAt,
     auditExample: audit.publishedAt,
     auditExampleOriginal: audit.originalId,
-    vulnExample: find('vuln_example').publishedAt,
     subjectExample: find('subject_example').publishedAt,
     dependencyExample: find('dependency_example').publishedAt,
     untrustedExample: find('untrusted_example').publishedAt,
