@@ -1,11 +1,11 @@
 # Display Conventions
 
 `attestation_registry` keeps its core type minimal — `Attestation<T>` has a
-`subject`, `data: T`, and an `active: bool`. Cross-cutting behaviors that
-schemas might want (expiration, dependency relationships, etc.) are expressed
-as **Display field conventions** rather than additional Move types. Off-chain
-consumers (wallets, indexers, the `ts/` library) recognize these conventional
-field names and apply the corresponding semantics when evaluating trust.
+`subject` and `data: T`. Cross-cutting behaviors that schemas might want
+(expiration, etc.) are expressed as **Display field conventions** rather than
+additional Move types. Off-chain consumers (wallets, indexers, the `ts/`
+library) recognize these conventional field names and apply the corresponding
+semantics when evaluating trust.
 
 The benefit of conventions-over-functors is composability: a schema can adopt
 zero, one, or many of these by including the corresponding fields in its
@@ -15,11 +15,12 @@ fields it surfaces, and conventions stack naturally.
 
 ## Base effectiveness
 
-All convention-based effectiveness rules below are **conjunctive with the
-registry's own revocation state**: an attestation is never effective when its
-on-chain `active` field is `false`. The conventions below add further
-conditions on top of that base; revocation alone is sufficient to make an
-attestation ineffective regardless of how its convention fields render.
+Revocation is **not** a convention — it's structural. An attestation lives in
+its subject's *active* box; `revoke` moves it out to a separate revoked-sink
+address. So a consumer that enumerates a subject's active box only ever sees
+un-revoked attestations — revocation needs no field to read, and there is no
+`active` flag to consult. The conventions below add *further* effectiveness
+conditions (e.g. expiry) on top of attestations already known to be active.
 
 ## Conventions
 
@@ -47,43 +48,6 @@ Off-chain evaluator pseudocode:
 const expiresAt = parseTimestamp(attestation.display?.expires_at);
 const expired = expiresAt !== null && Date.now() >= expiresAt;
 ```
-
-### `requires`
-
-An attestation is **effective** only if every attestation referenced in its
-`requires` Display field is itself effective. Effectiveness is evaluated
-transitively across the `requires` graph.
-
-The field's rendered type is a list of attestation object IDs. Recommended
-template:
-
-```move
-fields.push_back(b"requires".to_string());
-values.push_back(b"{data.requires:json}".to_string());
-```
-
-where the schema's `T` includes a `requires: vector<ID>` field.
-
-Off-chain evaluator pseudocode:
-
-```ts
-async function isEffective(att, visited = new Set()): Promise<boolean> {
-  if (!att.active) return false;
-  if (isExpired(att)) return false;
-  if (visited.has(att.id)) return false; // cycle: treat as ineffective
-  visited.add(att.id);
-  for (const reqId of att.display?.requires ?? []) {
-    const req = await fetchAttestation(reqId);
-    if (!await isEffective(req, visited)) return false;
-  }
-  return true;
-}
-```
-
-Cycle handling: a cycle in the `requires` graph is treated as ineffective.
-Schemas that need acyclicity should enforce it at issue time (e.g., by
-checking that none of the targets transitively reference the new attestation
-before issuing).
 
 ## Presentation fields
 

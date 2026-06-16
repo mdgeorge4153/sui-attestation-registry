@@ -16,19 +16,15 @@ use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
 use audit_example::audit::AuditAdminCap;
 
-/// V2 audit payload: adds a report link and a `requires` dependency list.
+/// V2 audit payload: adds a report link.
 public struct AuditV2 has store, drop {
     score: u8,
     /// URL of the full audit report (surfaced via the `link` convention).
     report_url: String,
-    /// Attestation ids this audit is conditional on (the `requires`
-    /// convention): if any required attestation becomes ineffective
-    /// (revoked/expired), this audit is considered ineffective too.
-    requires: vector<ID>,
 }
 
 /// One-shot setup: register the immutable `Display<Attestation<AuditV2>>`,
-/// including the `link` and `requires` convention fields.
+/// including the `link` convention field.
 public fun register_audit_v2_display(
     display_registry: &mut DisplayRegistry,
     ctx: &mut TxContext,
@@ -39,33 +35,30 @@ public fun register_audit_v2_display(
             b"name".to_string(),
             b"description".to_string(),
             b"link".to_string(),
-            b"requires".to_string(),
         ],
         vector[
             b"Audit attestation (v2)".to_string(),
             b"Score: {data.score}/100".to_string(),
             b"{data.report_url}".to_string(),
-            b"{data.requires:json}".to_string(),
         ],
         std::internal::permit<AuditV2>(),
         ctx,
     );
 }
 
-/// Issue an AuditV2 attestation about `subject`, conditional on `requires`.
-/// Revocable via `revoke_audit_v2` (same `AuditAdminCap` as v1 audits).
+/// Issue an AuditV2 attestation about `subject`. Revocable via
+/// `revoke_audit_v2` (same `AuditAdminCap` as v1 audits).
 public fun attest_audit_v2(
     registry: &Registry,
     subject: ID,
     score: u8,
     report_url: String,
-    requires: vector<ID>,
     ctx: &mut TxContext,
 ) {
     attestation_registry::attest<AuditV2>(
         registry,
         subject,
-        AuditV2 { score, report_url, requires },
+        AuditV2 { score, report_url },
         ctx,
     );
 }
@@ -85,9 +78,6 @@ public fun score(self: &AuditV2): u8 { self.score }
 
 /// The audit report URL.
 public fun report_url(self: &AuditV2): &String { &self.report_url }
-
-/// The attestation ids this audit is conditional on.
-public fun requires(self: &AuditV2): &vector<ID> { &self.requires }
 
 // === Undisplayed schema (negative test data) ===
 //

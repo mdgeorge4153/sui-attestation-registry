@@ -28,8 +28,7 @@ export function attestAuditTx(
 
 /**
  * Append `audit_example::audit_v2::attest_audit_v2(registry, subject, score,
- * report_url, requires)` to `tx`. `requires` is the list of attestation ids
- * this audit is conditional on (the `requires` convention).
+ * report_url)` to `tx`.
  *
  * `auditExamplePkg` must be the *upgraded* (v2) package id, since that is
  * where the `audit_v2` module is defined. Returns nothing (revoked via the
@@ -43,7 +42,6 @@ export function attestAuditV2Tx(
     subject: string;
     score: number;
     reportUrl: string;
-    requires: string[];
   },
 ): void {
   tx.moveCall({
@@ -53,8 +51,6 @@ export function attestAuditV2Tx(
       tx.pure.id(args.subject),
       tx.pure.u8(args.score),
       tx.pure.string(args.reportUrl),
-      // `vector<ID>` is BCS-identical to `vector<address>`.
-      tx.pure.vector('address', args.requires),
     ],
   });
 }

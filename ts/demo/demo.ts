@@ -3,12 +3,11 @@
  *   - create Boxes for two real published subjects: `dependency_example` and
  *     `subject_example` (which depends on it)
  *   - audit the dependency (Attestation<Audit>, v1 schema)
- *   - audit the subject with AuditV2 (the upgrade-added schema) that `requires`
- *     the dependency's audit
+ *   - audit the subject with AuditV2 (the upgrade-added schema)
  *   - list + pretty-print the attestations with their Display rendering
- *   - evaluate the subject audit's *effectiveness* (transitive `requires`)
- *   - revoke the dependency's audit, and show the subject audit flip to
- *     ineffective
+ *   - revoke the dependency's audit, and show it leave the dependency's active
+ *     box (revocation is by box membership — revoked attestations move to a
+ *     separate sink address and stop appearing in the active-box query)
  *   - write `demo-ids.json` (registry id, subjects, trusted attesters) for the
  *     MVR Postgres seeder
  *
@@ -39,8 +38,6 @@ import {
   boxAddress,
   createBoxTx,
   listAttestations,
-  getAttestation,
-  isEffective,
   type AttestationInfo,
 } from '../src/index.js';
 import {
@@ -187,8 +184,8 @@ async function main(): Promise<void> {
   // The two subjects: the dependency, and the package that depends on it.
   const dependency = pkgs.dependencyExample;
   const subject = pkgs.subjectExample;
-  const dependencyBox = boxAddress(registryId, dependency);
-  const subjectBox = boxAddress(registryId, subject);
+  const dependencyBox = boxAddress(pkgs.attestationRegistry, registryId, dependency);
+  const subjectBox = boxAddress(pkgs.attestationRegistry, registryId, subject);
 
   // Audit (v1) types use audit_example's ORIGINAL id; AuditV2 uses the v2 id.
   const auditType = auditAttestationType({
@@ -232,7 +229,7 @@ async function main(): Promise<void> {
     depAuditRef = ok.createdRefs.get(depAuditId)!;
   }
 
-  console.log('\n▶ TX 3 — attest_audit_v2 on subject (score=95, requires dependency audit)');
+  console.log('\n▶ TX 3 — attest_audit_v2 on subject (score=95)');
   let subjectAuditId: string;
   {
     const tx = new Transaction();
@@ -242,7 +239,6 @@ async function main(): Promise<void> {
       subject,
       score: 95,
       reportUrl: 'https://audits.example.com/subject-v1.pdf',
-      requires: [depAuditId],
     });
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
@@ -281,15 +277,18 @@ async function main(): Promise<void> {
     printAttestation(att);
   }
 
-  // Effectiveness honours the transitive `requires` convention: the subject
-  // audit is only effective while the dependency audit it requires is.
-  const ctx = { fetchById: (id: string) => getAttestation(client, id, { includeDisplay: true }) };
-  const reportEffective = async (label: string) => {
-    const root = await getAttestation(client, subjectAuditId, { includeDisplay: true });
-    console.log(`\n▶ ${label}: subject AuditV2 effective = ${await isEffective(root, ctx)}`);
+  // Revocation is by box membership: a revoked attestation is moved out of the
+  // subject's active box, so it stops appearing in this query.
+  const reportDepAudits = async (label: string) => {
+    const ids = (
+      await listAttestations(client, dependencyBox, { typeFilter: auditType })
+    ).map((a) => a.id);
+    console.log(
+      `\n▶ ${label}: Attestation<Audit> in dependency's active box = ${ids.length} ${JSON.stringify(ids)}`,
+    );
   };
 
-  await reportEffective('Before revoke');
+  await reportDepAudits('Before revoke');
 
   console.log('\n▶ TX 5 — revoke the dependency audit (via AuditAdminCap)');
   {
@@ -305,7 +304,7 @@ async function main(): Promise<void> {
     console.log(`  digest: ${ok.digest}`);
   }
 
-  await reportEffective('After revoke');
+  await reportDepAudits('After revoke');
 
   // Hand-off for the MVR Postgres seeder.
   const demoIds = {

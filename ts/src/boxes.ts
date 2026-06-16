@@ -1,13 +1,25 @@
 import { Transaction } from '@mysten/sui/transactions';
-import { deriveObjectID, fromHex, normalizeSuiAddress } from '@mysten/sui/utils';
+import { bcs } from '@mysten/sui/bcs';
+import { deriveObjectID, normalizeSuiAddress } from '@mysten/sui/utils';
+
+/** Mirror of the on-chain `attestation_registry::BoxKey { subject, revoked }`,
+ *  the key a subject's two boxes are derived from. */
+const BoxKey = bcs.struct('BoxKey', { subject: bcs.Address, revoked: bcs.bool() });
 
 /**
- * Compute the address of the per-subject `Box` derived from the given
- * `Registry`. Mirrors `derived_object::claim(registry, subject: ID)` on-chain.
+ * Compute the address of a subject's *active* `Box` under the given `Registry`.
+ * Mirrors `derived_object::derive_address(registry, BoxKey { subject, revoked:
+ * false })` on-chain: the box is keyed by the `BoxKey` struct (defined in the
+ * `attestation_registry` package — hence `registryPkg` is needed for the type
+ * tag), with `revoked: false` selecting the active box. Revoked attestations
+ * are moved to the sibling `revoked: true` address and never appear here.
  */
-export function boxAddress(registryId: string, subject: string): string {
-  const subjectBytes = fromHex(normalizeSuiAddress(subject).slice(2));
-  return deriveObjectID(registryId, '0x2::object::ID', subjectBytes);
+export function boxAddress(registryPkg: string, registryId: string, subject: string): string {
+  const keyBytes = BoxKey.serialize({
+    subject: normalizeSuiAddress(subject),
+    revoked: false,
+  }).toBytes();
+  return deriveObjectID(registryId, `${registryPkg}::attestation_registry::BoxKey`, keyBytes);
 }
 
 /**

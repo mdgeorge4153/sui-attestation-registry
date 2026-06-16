@@ -3,4 +3,4 @@
 // helpers live in ../examples/audit.ts; demo-only tooling in ../demo/.
 export { boxAddress, createBoxTx } from './boxes.js';
 export { listAttestations, getAttestation, type AttestationInfo } from './queries.js';
-export { isEffective, type ConventionsContext } from './conventions.js';
+export { isEffective } from './conventions.js';

@@ -2,62 +2,26 @@
  * Off-chain evaluator for the Display-field conventions documented in
  * CONVENTIONS.md at the repo root.
  *
- * An attestation is *effective* iff:
- *   1. its on-chain `active` field is true, AND
- *   2. its `expires_at` Display field (if present) is in the future, AND
- *   3. every attestation referenced via its `requires` Display field
- *      (if present) is itself effective (transitive).
- *
- * Cycles in the `requires` graph are treated as ineffective.
+ * Revocation is encoded by *which box* owns an attestation: `revoke` moves it
+ * out of its subject's active box to a separate sink address. So any
+ * attestation surfaced here — fetched from the active box — is, by
+ * construction, not revoked. The only remaining effectiveness gate is
+ * `expires_at`: an attestation is **effective** iff its `expires_at` Display
+ * field (when present) is still in the future.
  */
 
 import type { AttestationInfo } from './queries.js';
 
-export interface ConventionsContext {
-  /** Fetch an attestation by id. Required for `requires` traversal. */
-  fetchById: (id: string) => Promise<AttestationInfo>;
-  /** Current Unix-ms. Default: `Date.now()`. */
-  now?: () => number;
-}
-
-export async function isEffective(
-  attestation: AttestationInfo,
-  ctx: ConventionsContext,
-  visited: Set<string> = new Set(),
-): Promise<boolean> {
-  if (!readActive(attestation)) return false;
-
-  const expiresAt = readExpiresAt(attestation);
-  const now = (ctx.now ?? Date.now)();
-  if (expiresAt !== null && now >= expiresAt) return false;
-
-  const required = readRequires(attestation);
-  if (required.length > 0) {
-    if (visited.has(attestation.id)) return false; // cycle
-    const next = new Set(visited);
-    next.add(attestation.id);
-    for (const reqId of required) {
-      const req = await ctx.fetchById(reqId);
-      if (!(await isEffective(req, ctx, next))) return false;
-    }
-  }
-
-  return true;
-}
-
 /**
- * The registry's `register_display` auto-appends `active => {active}`, which
- * renders as `"true"` or `"false"`. Accept either the string or the parsed
- * boolean depending on how the consumer surfaced the display object.
+ * Whether `attestation` (already known to be in its subject's active box) is
+ * still effective. `now` defaults to `Date.now`; inject a fixed clock in tests.
  */
-function readActive(att: AttestationInfo): boolean {
-  const raw = att.display?.['active'];
-  if (raw === true || raw === 'true') return true;
-  if (raw === false || raw === 'false') return false;
-  // If active isn't in display, default to true so the conventions still
-  // apply on top of an as-yet-unaugmented attestation. A schema that wants
-  // strict checking should ensure `active` is in its Display template.
-  return true;
+export function isEffective(
+  attestation: AttestationInfo,
+  now: () => number = Date.now,
+): boolean {
+  const expiresAt = readExpiresAt(attestation);
+  return expiresAt === null || now() < expiresAt;
 }
 
 /**
@@ -77,26 +41,4 @@ function readExpiresAt(att: AttestationInfo): number | null {
     if (!Number.isNaN(asDate)) return asDate;
   }
   return null;
-}
-
-/**
- * The `requires` convention renders a list of attestation object IDs.
- * Schemas should use the `:json` transform to surface the field as a
- * structured array; for now we accept either an array or a JSON-string.
- */
-function readRequires(att: AttestationInfo): string[] {
-  const raw = att.display?.['requires'];
-  if (raw == null) return [];
-  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === 'string');
-  if (typeof raw === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed.filter((x): x is string => typeof x === 'string');
-      }
-    } catch {
-      // not JSON; ignore
-    }
-  }
-  return [];
 }

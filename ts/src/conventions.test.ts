@@ -1,62 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isEffective, type ConventionsContext } from './conventions.js';
+import { isEffective } from './conventions.js';
 import type { AttestationInfo } from './queries.js';
 
-/** Build a minimal AttestationInfo with just the fields the interpreter reads. */
-function att(id: string, display: Record<string, unknown>): AttestationInfo {
-  return { id, version: '1', digest: 'd', type: 'Attestation<T>', display };
+/** Build a minimal AttestationInfo with just the fields the evaluator reads. */
+function att(display: Record<string, unknown>): AttestationInfo {
+  return { id: '0x1', version: '1', digest: 'd', type: 'Attestation<T>', display };
 }
 
-/** A context that resolves `requires` ids against an in-memory map, with a
- *  fixed clock so expiry checks are deterministic. */
-function ctxOf(map: Record<string, AttestationInfo>): ConventionsContext {
-  return {
-    fetchById: async (id: string) => {
-      const a = map[id];
-      if (!a) throw new Error(`unexpected fetchById(${id})`);
-      return a;
-    },
-    now: () => 1000,
-  };
-}
+// Fixed clock: now = 1000ms past the epoch (1970-01-01T00:00:01.000Z).
+const now = () => 1000;
 
-test('active with no requires is effective', async () => {
-  const a = att('0x1', { active: 'true' });
-  assert.equal(await isEffective(a, ctxOf({ '0x1': a })), true);
+test('no expiry is effective', () => {
+  assert.equal(isEffective(att({}), now), true);
 });
 
-test('inactive (revoked) is ineffective', async () => {
-  const a = att('0x1', { active: 'false' });
-  assert.equal(await isEffective(a, ctxOf({ '0x1': a })), false);
+test('future expiry is effective', () => {
+  assert.equal(isEffective(att({ expires_at: '1500' }), now), true);
 });
 
-test('expired is ineffective', async () => {
-  const a = att('0x1', { active: 'true', expires_at: '500' }); // now=1000 > 500
-  assert.equal(await isEffective(a, ctxOf({ '0x1': a })), false);
+test('past expiry is ineffective', () => {
+  assert.equal(isEffective(att({ expires_at: '500' }), now), false);
 });
 
-test('requires an active dependency: effective', async () => {
-  const dep = att('0x2', { active: 'true' });
-  const a = att('0x1', { active: 'true', requires: ['0x2'] });
-  assert.equal(await isEffective(a, ctxOf({ '0x1': a, '0x2': dep })), true);
-});
-
-test('requires a revoked dependency: ineffective (transitive)', async () => {
-  const dep = att('0x2', { active: 'false' });
-  const a = att('0x1', { active: 'true', requires: ['0x2'] });
-  assert.equal(await isEffective(a, ctxOf({ '0x1': a, '0x2': dep })), false);
-});
-
-test('requires rendered as a JSON-array string is parsed', async () => {
-  const dep = att('0x2', { active: 'true' });
-  const a = att('0x1', { active: 'true', requires: '["0x2"]' });
-  assert.equal(await isEffective(a, ctxOf({ '0x1': a, '0x2': dep })), true);
-});
-
-test('cyclic requires is ineffective (cycle guard)', async () => {
-  const a = att('0x1', { active: 'true', requires: ['0x2'] });
-  const b = att('0x2', { active: 'true', requires: ['0x1'] });
-  assert.equal(await isEffective(a, ctxOf({ '0x1': a, '0x2': b })), false);
+test('ISO-8601 expiry is parsed', () => {
+  assert.equal(isEffective(att({ expires_at: '1970-01-01T00:00:00.500Z' }), now), false);
+  assert.equal(isEffective(att({ expires_at: '1970-01-01T00:00:02.000Z' }), now), true);
 });
