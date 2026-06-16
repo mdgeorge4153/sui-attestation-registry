@@ -95,7 +95,6 @@ fun test_attest_and_read() {
     let a = attestation_registry::borrow_for_testing<TestSchema>(&mut box, rcv);
     assert!(a.subject() == subject, 1);
     assert!(a.data().tag == 42, 2);
-    assert!(a.is_active(), 3);
     attestation_registry::put_back_for_testing(&mut box, a);
 
     test_scenario::return_shared(box);
@@ -129,8 +128,11 @@ fun test_reissuance_succeeds() {
     scenario.end();
 }
 
+/// Revocation moves the attestation out of the active box and into the
+/// subject's revoked sink: the active box empties, the sink (a bare address)
+/// now owns it.
 #[test]
-fun test_revoke_flips_is_active() {
+fun test_revoke_moves_attestation_to_sink() {
     let subject = subject_for(@0xDEAD);
     let mut scenario = setup_with_box(subject);
 
@@ -139,19 +141,18 @@ fun test_revoke_flips_is_active() {
         &registry, subject, TestSchema { tag: 7 },
         scenario.ctx(),
     );
+    let sink = attestation_registry::revoked_box_address(&registry, subject);
     test_scenario::return_shared(registry);
 
-    // Pre-revoke borrow: read shows active=true.
+    // Pre-revoke: the attestation is in the active box; the sink is empty.
     scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
+    let box: Box = scenario.take_shared();
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
         object::id(&box),
     );
+    assert!(ids.length() == 1, 0);
     let id = ids[0];
-    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
-    let a = attestation_registry::borrow_for_testing<TestSchema>(&mut box, rcv);
-    assert!(a.is_active(), 0);
-    attestation_registry::put_back_for_testing(&mut box, a);
+    assert!(!test_scenario::has_most_recent_for_address<Attestation<TestSchema>>(sink), 1);
     test_scenario::return_shared(box);
 
     // Revoke. The test module defines `TestSchema`, so it can mint the
@@ -159,16 +160,21 @@ fun test_revoke_flips_is_active() {
     scenario.next_tx(ALICE);
     let mut box: Box = scenario.take_shared();
     let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
-    attestation_registry::revoke<TestSchema>(&mut box, std::internal::permit<TestSchema>(), rcv);
+    attestation_registry::revoke<TestSchema>(
+        &mut box, std::internal::permit<TestSchema>(), rcv,
+    );
     test_scenario::return_shared(box);
 
-    // Post-revoke: read shows active=false.
+    // Post-revoke: the active box no longer holds it; the sink now does.
     scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
-    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
-    let a = attestation_registry::borrow_for_testing<TestSchema>(&mut box, rcv);
-    assert!(!a.is_active(), 1);
-    attestation_registry::put_back_for_testing(&mut box, a);
+    let box: Box = scenario.take_shared();
+    assert!(
+        test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
+            object::id(&box),
+        ).is_empty(),
+        2,
+    );
+    assert!(test_scenario::has_most_recent_for_address<Attestation<TestSchema>>(sink), 3);
     test_scenario::return_shared(box);
 
     scenario.end();

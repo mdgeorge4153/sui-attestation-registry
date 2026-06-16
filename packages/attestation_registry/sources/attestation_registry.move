@@ -21,16 +21,28 @@ public struct Registry has key {
     id: UID,
 }
 
-/// Per-subject child of `Registry`. Owns every attestation about its subject
-/// via transfer-to-object; the Attestation lives at the Box's address.
+/// Derived-address key for a subject's two boxes. `revoked: false` is the
+/// active box (a claimed, shared `Box`); `revoked: true` is the revoked sink
+/// — a bare address that revoked attestations are moved to and only ever read
+/// off-chain. The two are siblings under the same `Registry`, so off-chain
+/// consumers compute either from `(registry_id, subject_id)`.
+public struct BoxKey has copy, drop, store {
+    subject: ID,
+    revoked: bool,
+}
+
+/// Per-subject child of `Registry`: the *active* box. Owns every un-revoked
+/// attestation about its subject via transfer-to-object.
 ///
-/// The Box's address is `derived_object::derive_address(registry, subject)`,
-/// so off-chain consumers can compute it from `(registry_id, subject_id)` and
-/// enumerate via `getOwnedObjects(box_addr, filter={StructType: ...})` —
-/// native server-side type filtering, no client-side post-filter.
+/// Its address is `derive_address(registry, BoxKey { subject, revoked: false })`,
+/// computable off-chain from `(registry_id, subject_id)`. `revoke` *moves*
+/// attestations out to the revoked sink, so enumerating this box yields exactly
+/// the active set — no per-object status filter. `registry` is the parent id,
+/// retained so `revoke` can derive the sink without a `&Registry` argument.
 public struct Box has key {
     id: UID,
     subject: ID,
+    registry: ID,
 }
 
 /// Typed attestation about `subject`. Stored as an object owned-by-Box via
@@ -40,14 +52,13 @@ public struct Box has key {
 /// callers have no way to obtain an `Attestation<T>` by value (no public
 /// function returns one), and even if they did they couldn't transfer it
 /// (`public_transfer` requires `store`), wrap it in another struct (Move
-/// forbids storing `key` objects inside other objects), or drop it. The only
-/// disposition of an `Attestation<T>` is through this module's `revoke`,
-/// which receives it internally and re-transfers it to the owning Box.
+/// forbids storing `key` objects inside other objects), or drop it. Its only
+/// dispositions are `attest` (into the active box) and `revoke` (out to the
+/// revoked sink); revocation is encoded by *which* box owns it, not by a field.
 public struct Attestation<T: store> has key {
     id: UID,
     subject: ID,
     data: T,
-    active: bool,
 }
 
 /// Emitted by every `attest` call. Indexers filter by the phantom `T`
@@ -79,12 +90,15 @@ fun init(ctx: &mut TxContext) {
     transfer::share_object(Registry { id: object::new(ctx) });
 }
 
-/// Create the per-subject `Box`. Aborts `EBoxAlreadyExists` if one already
-/// exists for this `subject`.
+/// Create the per-subject active `Box`. Aborts `EBoxAlreadyExists` if one
+/// already exists for this `subject`. The revoked sink is not claimed — it is
+/// a bare address `revoke` transfers to (see `revoked_box_address`).
 public fun create_box(registry: &mut Registry, subject: ID) {
-    assert!(!derived_object::exists(&registry.id, subject), EBoxAlreadyExists);
-    let id = derived_object::claim(&mut registry.id, subject);
-    transfer::share_object(Box { id, subject });
+    let registry_id = object::id(registry);
+    let key = BoxKey { subject, revoked: false };
+    assert!(!derived_object::exists(&registry.id, key), EBoxAlreadyExists);
+    let id = derived_object::claim(&mut registry.id, key);
+    transfer::share_object(Box { id, subject, registry: registry_id });
 }
 
 // === Accessors ===
@@ -95,15 +109,25 @@ public fun subject<T: store>(self: &Attestation<T>): ID { self.subject }
 /// The typed payload.
 public fun data<T: store>(self: &Attestation<T>): &T { &self.data }
 
-/// `true` iff `self` has not been revoked. Time-based effectiveness (e.g.
-/// expiration) is expressed via Display conventions, not via this field —
-/// see CONVENTIONS.md.
-public fun is_active<T: store>(self: &Attestation<T>): bool { self.active }
-
 /// Original-publish address of `T`'s defining package. Useful for on-chain
 /// trust-list checks (e.g.
 /// `assert!(trust_list.contains(attester_of<Audit>()))`).
 public fun attester_of<T>(): address { type_name::original_id<T>() }
+
+/// Address of `subject`'s revoked sink under `registry`: where `revoke` moves
+/// revoked attestations. Bare (never claimed) — revocation is terminal, so the
+/// sink is only ever read off-chain via `getOwnedObjects`. Off-chain consumers
+/// compute the same address from `(registry_id, subject_id)`.
+public fun revoked_box_address(registry: &Registry, subject: ID): address {
+    revoked_address(object::id(registry), subject)
+}
+
+/// Shared derivation of the revoked-sink address from the parent `registry`
+/// id, so `revoke` (which holds only the id) and `revoked_box_address` (which
+/// holds a `&Registry`) can't drift in how they salt the key.
+fun revoked_address(registry: ID, subject: ID): address {
+    derived_object::derive_address(registry, BoxKey { subject, revoked: true })
+}
 
 // === Attest / Revoke ===
 
@@ -121,13 +145,13 @@ public fun attest<T: store>(
     data: T,
     ctx: &mut TxContext,
 ): ID {
-    assert!(derived_object::exists(&registry.id, subject), EBoxDoesNotExist);
-    let box_addr = derived_object::derive_address(object::id(registry), subject);
+    let key = BoxKey { subject, revoked: false };
+    assert!(derived_object::exists(&registry.id, key), EBoxDoesNotExist);
+    let box_addr = derived_object::derive_address(object::id(registry), key);
     let attestation = Attestation<T> {
         id: object::new(ctx),
         subject,
         data,
-        active: true,
     };
     let attestation_id = object::id(&attestation);
     event::emit(Attested<T> { subject });
@@ -135,23 +159,24 @@ public fun attest<T: store>(
     attestation_id
 }
 
-/// Revoke the attestation referenced by `rcv`: flip its `active` flag to
-/// false and re-transfer it to the owning Box. `rcv` alone identifies which
-/// attestation, so no id check is needed here.
+/// Revoke the attestation referenced by `rcv`: receive it from its active
+/// `box` and move it to the subject's revoked sink (see `revoked_box_address`),
+/// where it stays readable off-chain but out of the active set. Terminal —
+/// there is no un-revoke. `rcv` alone identifies which attestation.
 ///
 /// Gated by `Permit<T>`: only `T`'s defining module can mint one, so the
 /// *policy* for who may revoke (a bearer cap, an admin cap, a multisig, …)
-/// lives in that module, while the state transition and `Revoked<T>` event
-/// stay uniform here — the same split as `register_display`.
+/// lives in that module, while the move and `Revoked<T>` event stay uniform
+/// here — the same split as `register_display`.
 public fun revoke<T: store>(
     box: &mut Box,
     _: Permit<T>,
     rcv: Receiving<Attestation<T>>,
 ) {
-    let mut a = transfer::receive(&mut box.id, rcv);
-    a.active = false;
-    event::emit(Revoked<T> { subject: a.subject });
-    transfer::transfer(a, box.id.to_address());
+    let a = transfer::receive(&mut box.id, rcv);
+    let subject = a.subject;
+    event::emit(Revoked<T> { subject });
+    transfer::transfer(a, revoked_address(box.registry, subject));
 }
 
 // === Display ===
@@ -161,23 +186,20 @@ public fun revoke<T: store>(
 /// it); one-per-T enforcement is provided by `display_registry`.
 ///
 /// Template strings in `values` reference fields of `Attestation<T>`:
-/// - Top-level: `{subject}`, `{data}`, `{active}`
+/// - Top-level: `{subject}`, `{data}`
 /// - T's own fields are under `{data.<field>}` (e.g. `{data.score}`)
 ///
-/// One field is appended automatically: `active` rendering `true`/`false`.
-/// Schemas adopting cross-cutting conventions (`expires_at`, `requires`,
-/// etc. — see CONVENTIONS.md) include those fields themselves.
+/// Revocation is not a Display field — it's encoded by which box owns the
+/// attestation. Schemas adopting cross-cutting conventions (`expires_at`,
+/// `requires`, etc. — see CONVENTIONS.md) include those fields themselves.
 #[allow(lint(freeze_wrapped))]
 public fun register_display<T: store>(
     display_registry: &mut DisplayRegistry,
-    mut fields: vector<String>,
-    mut values: vector<String>,
+    fields: vector<String>,
+    values: vector<String>,
     _: Permit<T>,
     ctx: &mut TxContext,
 ) {
-    fields.push_back(b"active".to_string());
-    values.push_back(b"{active}".to_string());
-
     let (mut display, cap) = display_registry::new<Attestation<T>>(
         display_registry,
         std::internal::permit<Attestation<T>>(),

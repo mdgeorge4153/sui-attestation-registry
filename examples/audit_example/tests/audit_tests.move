@@ -41,7 +41,6 @@ fun test_attest_audit_cross_package() {
     let a = attestation_registry::borrow_for_testing<Audit>(&mut box, rcv);
     assert!(a.subject() == subject, 0);
     assert!(a.data().score() == 9, 1);
-    assert!(a.is_active(), 2);
     attestation_registry::put_back_for_testing(&mut box, a);
 
     // attester_of<Audit> must resolve to audit_example's package address,
@@ -56,7 +55,7 @@ fun test_attest_audit_cross_package() {
 }
 
 /// The admin-cap revocation policy: a holder of `AuditAdminCap` revokes an
-/// audit, flipping `is_active` to false.
+/// audit, moving it out of the active box and into the revoked sink.
 #[test]
 fun test_revoke_audit_with_admin_cap() {
     let subject = subject_for(@0xDEAD);
@@ -71,6 +70,7 @@ fun test_revoke_audit_with_admin_cap() {
     scenario.next_tx(ALICE);
     let registry: Registry = scenario.take_shared();
     audit::attest_audit(&registry, subject, 9, report_url(), scenario.ctx());
+    let sink = attestation_registry::revoked_box_address(&registry, subject);
     test_scenario::return_shared(registry);
 
     // Revoke with the admin cap.
@@ -86,13 +86,16 @@ fun test_revoke_audit_with_admin_cap() {
     transfer::public_transfer(admin, ALICE);
     test_scenario::return_shared(box);
 
-    // Read back: the audit is now inactive.
+    // The audit left the active box for the revoked sink.
     scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
-    let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(id);
-    let a = attestation_registry::borrow_for_testing<Audit>(&mut box, rcv);
-    assert!(!a.is_active(), 0);
-    attestation_registry::put_back_for_testing(&mut box, a);
+    let box: Box = scenario.take_shared();
+    assert!(
+        test_scenario::receivable_object_ids_for_owner_id<Attestation<Audit>>(
+            object::id(&box),
+        ).is_empty(),
+        0,
+    );
+    assert!(test_scenario::has_most_recent_for_address<Attestation<Audit>>(sink), 1);
     test_scenario::return_shared(box);
 
     scenario.end();
