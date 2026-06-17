@@ -27,19 +27,26 @@ see `FUTURE-EXTENSIONS.md`. For the comparison with SIP-56, see
 
 ```
 Registry (shared singleton)
-  └── derived_object → Box (one per subject)
-                       └── owns Attestation<T> via TTO
+  ├── BoxKey{subject, revoked:false} → active Box   → owns un-revoked Attestation<T> (TTO)
+  └── BoxKey{subject, revoked:true}  → revoked sink → owns revoked Attestation<T>
 ```
 
 - **`Registry`** is a `key`-only shared singleton, created in `init`.
   Its UID is the parent for all per-subject boxes.
-- **`Box`** is `key`-only and per-subject. Its address is
-  `derived_object::derive_address(registry, subject)` — *computable
-  off-chain* from `(registry_id, subject_id)`. Off-chain consumers
-  fetch every attestation about a subject from this single address
-  via `getOwnedObjects(box_addr, filter={StructType: ...})`, with
-  native server-side type filtering.
-- **`Attestation<T: store>`** is `key`-only, owned by the Box via
+- **`Box`** is `key`-only and per-subject — the subject's *active* box.
+  Its address is `derived_object::derive_address(registry, BoxKey {
+  subject, revoked: false })` — *computable off-chain* from
+  `(registry_id, subject_id)`. Off-chain consumers fetch every un-revoked
+  attestation about a subject from this single address via
+  `getOwnedObjects(box_addr, filter={StructType: ...})`, with native
+  server-side type filtering.
+- **Revoked sink.** The sibling address `derive_address(registry, BoxKey {
+  subject, revoked: true })` is a bare address (never claimed) that
+  `revoke` moves attestations to (see "Revocation"). Enumerating the
+  active box therefore yields exactly the un-revoked set, with no
+  per-object status flag to read; the sink is read separately to list
+  revoked attestations.
+- **`Attestation<T: store>`** is `key`-only, owned by the active Box via
   `transfer::transfer(attestation, box.id.to_address())`.
 
 ### Why TTO, not DOF
@@ -65,6 +72,8 @@ The Box object exists for two reasons:
 - It carries a `subject: ID` field, so a viewer who inspects the Box
   directly knows what it's about without separately knowing the
   `(registry, subject)` pair that derived its address.
+- It carries the parent `registry: ID`, so `revoke` can derive the
+  revoked-sink address from the Box alone — no `&Registry` argument.
 - `transfer::receive` requires a `&mut UID` for the parent. Without an
   actual object at the derived address, there's no UID to borrow; you
   couldn't revoke (or do anything else that needs to take an attestation
@@ -80,7 +89,6 @@ public struct Attestation<T: store> has key {
     id: UID,
     subject: ID,
     data: T,
-    active: bool,
 }
 ```
 
@@ -94,16 +102,20 @@ and even if they did:
 - No `drop` means they can't discard it.
 
 The only legal disposition of an `Attestation<T>` is through this module's
-`revoke`, which receives it internally, flips `active`, and re-transfers it
-to the owning Box. Bytecode-enforced; no discipline note required.
+`revoke`, which receives it from the active Box and transfers it to the
+subject's revoked sink. Bytecode-enforced; no discipline note required.
 
-## `active: bool`, not a `Status` enum
+## Revocation status by box membership, not a field
 
-We tried `enum Status { Active, ActiveUntil { expires_at_ms }, Revoked }`
-during the iteration that put expiration on-chain. After moving expiration
-to a Display convention (see "Display-mixin conventions" below), there's
-only one bit of on-chain state to track: revoked or not. A bool is the
-right shape; the enum was carrying complexity that didn't pay for itself.
+The attestation carries no status field at all. Revocation is encoded by
+*which* box owns it: live attestations sit in the subject's active box, and
+`revoke` moves an attestation out to the revoked sink (see "Revocation").
+We tried an on-chain `enum Status` and then an `active: bool` flag during
+earlier iterations; both made every off-chain read pay a per-object status
+filter. Encoding status in the address the attestation lives at removes
+that: enumerating the active box returns exactly the un-revoked set, the
+revoked sink returns exactly the revoked set, and the struct stays `{ id,
+subject, data }`.
 
 ## Attester identity: from `T`'s package, not the signer
 
@@ -145,27 +157,33 @@ public fun attest<T: store>(registry, subject, data, ctx): ID
 public fun revoke<T: store>(box: &mut Box, _: Permit<T>, rcv: Receiving<Attestation<T>>)
 ```
 
-`revoke` flips `active` to false and re-transfers the attestation to its
-Box. The state transition and the `Revoked<T>` event live here, uniform
-across every attestation type — but the *authority* to call it does not.
-`revoke` is gated by `Permit<T>`, which only `T`'s defining module can
-mint, so the registry prescribes no revocation policy. Each schema
-decides who may revoke and expresses it in its own `revoke_*` wrapper,
-which performs whatever check it wants and then mints the permit.
+`revoke` receives the attestation from its active `Box` and transfers it to
+the subject's revoked sink (derived from the Box's stored `registry` id).
+The move and the `Revoked<T>` event live here, uniform across every
+attestation type — but the *authority* to call it does not. `revoke` is
+gated by `Permit<T>`, which only `T`'s defining module can mint, so the
+registry prescribes no revocation policy. Each schema decides who may
+revoke and expresses it in its own `revoke_*` wrapper, which performs
+whatever check it wants and then mints the permit.
 
 `attest` returns the new attestation's `ID` — the one piece a schema
 can't otherwise recover, since the object goes straight to the Box — so a
 schema can bind a bearer cap to it, log it, or ignore it.
 
 This splits the two things a built-in bearer cap used to bundle: the
-*state + event* (kept uniform in the base) from the *authority model*
+*move + event* (kept uniform in the base) from the *authority model*
 (delegated to the schema). It costs the base nothing in expressiveness —
 every policy, including the exact per-attestation bearer cap, is
-reconstructable schema-side (see "Schema-level patterns"). The one
-property it gives up is bytecode-provable *irrevocability*: a schema is
-permanent only by exposing no revoke path, which a later upgrade could
-add. That's weaker than burning a cap, but upgrade authority is already
-attestation-dynamics authority, so it composes.
+reconstructable schema-side (see "Schema-level patterns").
+
+Revocation is **terminal in the current bytecode** — the revoked sink is
+never claimed, so there's no `&mut UID` to receive a revoked attestation
+back — but it is not cryptographically permanent: a future upgrade could
+claim the sink key and receive the objects (e.g. to un-revoke). The one
+property the design gives up is bytecode-provable *irrevocability*: a
+schema is permanent only by exposing no revoke path, which a later upgrade
+could add. That's weaker than burning a cap, but upgrade authority is
+already attestation-dynamics authority, so it composes.
 
 ## Display registration and the freeze-the-wrapper pattern
 
@@ -177,8 +195,8 @@ public struct DisplayLock<T: store> has key {
 ```
 
 `register_display<T>(...)` creates the Display, applies the fields the
-schema passed in (plus an auto-appended `active` field), shares the
-Display, then **freezes a `DisplayLock<T>`** containing the `DisplayCap`.
+schema passed in, shares the Display, then **freezes a `DisplayLock<T>`**
+containing the `DisplayCap`.
 
 The DisplayCap is the cap that authorizes `set`/`unset`/`clear` on the
 Display, so locking it makes the Display content permanently immutable.
@@ -210,17 +228,16 @@ public struct Revoked<phantom T> has copy, drop { subject: ID }
 
 ## Display-mixin conventions
 
-Cross-cutting behaviors like expiration (`expires_at`) and dependency
-relationships (`requires`) are expressed as Display field conventions,
-evaluated off-chain by `ts/lib/conventions.ts` and any consumer that
-adopts them. See `CONVENTIONS.md`.
+Cross-cutting behaviors like expiration (`expires_at`) are expressed as
+Display field conventions, evaluated off-chain by `ts/src/conventions.ts`
+and any consumer that adopts them. See `CONVENTIONS.md`.
 
 Rationale: these behaviors don't need on-chain enforcement for trust
 signals (the registry is off-chain primary), and putting them on-chain
 as Move types created composability problems (`WithExpiry<Audit<OtterSec>>`
 is awkward to nest; the attester resolution rule got confused by
-wrappers). Display fields stack naturally — a schema adopting both
-`expires_at` and `requires` just includes both fields in its
+wrappers). Display fields stack naturally — a schema adopting several
+conventions just includes the corresponding fields in its
 `register_display` call.
 
 ## Schema-level patterns
@@ -230,21 +247,22 @@ their attestation semantics in the schema package, not via registry
 flags:
 
 - **Revocation policy**: a schema gates its `revoke_*` wrapper however it
-  likes before minting `Permit<T>`. The two example schemas span the
-  range: `audit_example` uses a single `AuditAdminCap` (one authority
-  revokes any audit, across both `Audit` and `AuditV2`); `vuln_example`
-  reconstructs a per-attestation bearer cap (`VulnRevokeCap` bound to the
-  attestation id, with a `transfer::receiving_object_id` guard). A schema
-  that exposes no `revoke_*` wrapper is permanent.
+  likes before minting `Permit<T>`. `audit_example` uses a single
+  `AuditAdminCap` (one authority revokes any audit, across both `Audit`
+  and `AuditV2`). The other end of the range — a per-attestation bearer
+  cap (`VulnRevokeCap` bound to the attestation id, with a
+  `transfer::receiving_object_id` guard) — is the planned `vuln_example`
+  schema, a fast-follow not in the positive MVP. A schema that exposes no
+  `revoke_*` wrapper is permanent.
 - **Permissioned vs. permissionless**: schemas decide whether to expose
   a public constructor for their data type. Private constructor =
   permissioned (only the schema package can attest). Public constructor
   + `sender: address` field on the data = permissionless with per-
   attestation signer captured in the data.
-- **Expiration / dependencies**: opt into the `expires_at` and
-  `requires` Display conventions by including the corresponding
-  template entries in `register_display`. Off-chain consumers apply
-  the semantics; the registry doesn't know or care.
+- **Expiration**: opt into the `expires_at` Display convention by
+  including the corresponding template entry in `register_display`.
+  Off-chain consumers apply the semantics; the registry doesn't know or
+  care.
 
 ## What this design deliberately doesn't have
 
@@ -269,8 +287,8 @@ flags:
 ## Related documents
 
 - `README.md` — quickstart, repo layout, how to run the demo.
-- `CONVENTIONS.md` — schema-level Display conventions (`expires_at`,
-  `requires`, …) and their semantics.
+- `CONVENTIONS.md` — schema-level Display conventions (`expires_at`, …)
+  and their semantics.
 - `FUTURE-EXTENSIONS.md` — design memos for surfaces deferred from v0
   (on-chain inspection patterns).
 - `SIP-56-COMPARISON.md` — point-by-point comparison with SIP-56 and

@@ -54,9 +54,10 @@ discussion ended.
   Attestations are owned by the Box via transfer-to-object. Off-chain
   consumers fetch all attestations about a subject from a single
   computable address.
-- **Receive / modify / re-transfer pattern** for in-place state changes.
-  Revocation in this PoC works exactly this way: the registry receives the
-  attestation from its Box, flips `active` to false, and re-transfers it.
+- **Receive / re-transfer pattern** for state changes. Revocation in this
+  PoC works this way: the registry receives the attestation from its active
+  Box and transfers it to the subject's revoked sink (a sibling derived
+  address).
 
 These are the load-bearing improvements that came out of the SIP-56 PR
 discussion, and both designs build on them.
@@ -218,11 +219,9 @@ package owner." This PoC argues that's the wrong principal:
   attesters). Both live off-chain naturally and don't need a Move-level
   primitive to express.
 
-This is the most opinionated of the remaining differences. Consumers can
-implement their own curation by maintaining off-chain trust lists of
-attesters they consider authoritative, or by composing the `requires`
-display convention (see `CONVENTIONS.md`) to express "this attestation
-is only effective if some other attestation is also effective."
+This is the most opinionated of the remaining differences. Consumers
+implement their own curation by maintaining off-chain trust lists of the
+attesters they consider authoritative.
 
 ### 5. Storage: per-subject `Box` (derived child), not central registry
 
@@ -267,28 +266,31 @@ Other fields are denormalization — they appear in tx effects or in the
 attestation's own state, so duplicating them in the event is a
 maintenance hazard (two sources of truth) without information gain.
 
-### 7. `active: bool` and event-recorded revoker
+### 7. Revocation status by box membership, and event-recorded revoker
 
 SIP-56's attestation struct has `revoked_by: Option<address>` —
 `None` means active, `Some(addr)` records who revoked.
 
-This PoC has `active: bool` on the struct; revoker identity goes in the
-`Revoked` event.
+This PoC stores no status on the struct at all: revocation is encoded by
+*which* box owns the attestation (live in the active box, revoked in the
+sink), and revoker identity goes in the `Revoked` event.
 
 **Why this is an improvement**: the revoker is in the tx context already
 (`tx.sender()` of the revoke tx); the event carries it explicitly for
 indexer convenience. Storing it on the struct is denormalization with the
-same "two sources of truth" hazard as the event-field case. The
-`active: bool` shape is also less surface area than `Option<address>`
-for the common "is this still effective" check.
+same "two sources of truth" hazard as the event-field case. And encoding
+revoked-vs-live as box membership means the common read — "all the live
+attestations about S" — is a single `getOwnedObjects` on the active box
+with no per-object status field to filter on.
 
 ### 8. Revocation policy lives in the schema, not the core
 
 SIP-56 (post-PR) bakes a universal bearer `RevokeCap` into the registry.
 This PoC keeps the core policy-free: `revoke<T>(box, _: Permit<T>, rcv)` is
 gated only by `Permit<T>` — which only `T`'s defining module can mint — and
-performs a uniform state transition (`active = false`) plus a `Revoked<T>`
-event. It mints no cap. `attest<T>` returns the new attestation's `ID`, the
+performs a uniform move (out of the active box, into the revoked sink) plus
+a `Revoked<T>` event. It mints no cap. `attest<T>` returns the new
+attestation's `ID`, the
 one fact a schema can't otherwise recover, so the schema can build whatever
 revocation authority it wants: a bearer cap bound to that id, an admin cap,
 a multisig, or none.
@@ -333,7 +335,7 @@ plays out in this PoC:
 | Scope: minimum viable attestations | Broad agreement on minimal scope | Adopted |
 | Revocation (per-type vs. universal) | Universal via `RevokeCap` | Diverged: policy-free core gated by `Permit<T>`; revocation policy lives in the schema |
 | Pinning: hide vs. highlight | Switched to highlight | Removed entirely (consumer concern) |
-| Modifying attestations | Receive-modify-retransfer via derived addresses | Adopted (in `revoke`) |
+| Modifying attestations | Receive-modify-retransfer via derived addresses | Adopted as receive-and-retransfer: `revoke` moves the attestation between derived addresses, no in-place mutation |
 | Authorization scheme | Sender → `*Cap` pattern | Diverged: `Permit<T>` gating (schema chooses cap / admin / multisig) |
 | Display immutability | Frozen `AttestationType<T>` wraps `DisplayCap` | Same freeze-a-wrapper mechanism (`DisplayLock<T>`) |
 | Self-discoverable types | Frontends fetch list via on-chain `AttestationType<T>` | Off-chain via event subscription |
@@ -351,10 +353,8 @@ typical mitigation:
   about types.
 - **"We need pinning for explorer UX"**: a separate "trust list" package
   per consumer surface (wallet, explorer) can express which attestations
-  to surface, keyed on whatever criteria that consumer wants. The
-  `requires` convention in `CONVENTIONS.md` is a starting point for
-  expressing dependency relationships between attestations on-chain
-  without involving the package author.
+  to surface, keyed on whatever criteria that consumer wants — without
+  involving the package author.
 - **"We need permissionless attest"**: schema packages express this in
   the schema by exposing a public constructor and (typically) embedding
   `sender: address` in the data. See Section 3 above for the pattern.

@@ -6,8 +6,8 @@ and CLI demo that exercises it.
 
 The design is **off-chain-primary**: attestations are stored under a
 deterministic, type-filterable on-chain layout that's cheap to enumerate from
-indexers; cross-cutting behaviors like expiration and dependency tracking are
-expressed as Display-field **conventions** rather than additional Move types.
+indexers; cross-cutting behaviors like expiration are expressed as
+Display-field **conventions** rather than additional Move types.
 
 ## Repo layout
 
@@ -16,7 +16,6 @@ packages/
   attestation_registry/       — the only deployable: Registry, Box, Attestation
 examples/                     — reusable schema patterns for third-party attesters
   audit_example/              — sample schema: Audit { score: u8 } (+ AuditV2 upgrade)
-  vuln_example/               — sample "negative" schema: Vulnerability { severity, cve_id, description }
 demo/                         — fixtures that exist only to drive the local demo
   dependency_example/         — a subject; dependency of subject_example
   subject_example/            — the browsed subject (depends on dependency_example)
@@ -25,7 +24,7 @@ ts/
   src/                        — client SDK: Box derivation, queries, conventions evaluator
   examples/audit.ts           — auditor-side PTB builders for the audit_example schema
   demo/                       — end-to-end CLI + dev tooling
-CONVENTIONS.md                — Display-field conventions (expires_at, requires, …)
+CONVENTIONS.md                — Display-field conventions (expires_at, …)
 FUTURE-EXTENSIONS.md          — design memos for surfaces deliberately deferred from v0
 ```
 
@@ -39,13 +38,15 @@ server-side type filtering. Each `Attestation<T>` is owned by its Box via
 transfer-to-object. Attestations are issued by `attestation_registry::attest`;
 constructing the `T` value it takes is already restricted by Move to `T`'s
 defining package, so the recorded attester is `T`'s package — bound to the
-type at compile time, not denormalized into a field. Revocation flips an
-attestation's `active` flag and is gated by `Permit<T>`, which only `T`'s
-package can mint — so each schema defines its own revocation authority (an
-admin cap, a per-attestation bearer cap, or none at all). Time-based
-effectiveness (expiration), dependency relationships (`requires`), and other
+type at compile time, not denormalized into a field. Revocation moves an
+attestation from its subject's active box to a separate revoked-sink address
+and is gated by `Permit<T>`, which only `T`'s package can mint — so each
+schema defines its own revocation authority (an admin cap, a per-attestation
+bearer cap, or none at all). Time-based effectiveness (expiration) and other
 cross-cutting concerns sit in the Display layer per the conventions in
-`CONVENTIONS.md` — the registry itself stays minimal.
+`CONVENTIONS.md` — the registry itself stays minimal. ("Negative"
+attestations — vulnerability disclosures that propagate from a dependency to
+its dependents — are a planned fast-follow, not in this positive MVP.)
 
 ## Building and testing
 
@@ -55,7 +56,6 @@ directory:
 ```bash
 cd packages/attestation_registry && sui move test
 cd examples/audit_example        && sui move test
-cd examples/vuln_example         && sui move test
 ```
 
 You'll need a `sui` CLI new enough to support the `#[error(code = …)]`
@@ -65,9 +65,12 @@ update via `suiup install sui@testnet`.
 
 ## Running the TS demo
 
-The demo creates a fresh Box, issues two `Attestation<Audit>` (score 60 and
-score 95), lists them with their Display rendering, revokes the score-60 one,
-and re-lists to show the `active=false` transition.
+The demo creates Boxes for two real subjects (`dependency_example` and the
+`subject_example` that depends on it), issues audits (an `Audit` on the
+dependency; an `AuditV2` and a v1 `Audit` on the subject) plus two
+attestations a trust consumer must filter out, then revokes the dependency's
+audit and the subject's v1 `Audit` — showing each leave its active box (the
+subject keeps its `AuditV2` as the live signal).
 
 ### One-command (recommended for iteration)
 
@@ -77,7 +80,7 @@ bash scripts/run-demo.sh
 
 `scripts/run-demo.sh` owns the full lifecycle: kills any stale localnet,
 starts a fresh `sui start --with-faucet`, waits for the JSON-RPC and faucet
-ports, faucets gas, test-publishes all three packages, registers Displays,
+ports, faucets gas, test-publishes all packages, registers Displays,
 runs the demo, and **kills the localnet on exit** (success or failure).
 Override the sui CLI binary with `SUI=/path/to/sui bash scripts/run-demo.sh`.
 
@@ -100,7 +103,7 @@ Prerequisites:
    sui client faucet
    ```
 
-3. Test-publish all three packages with one shared pubfile and register the
+3. Test-publish all packages with one shared pubfile and register the
    Displays. The script does the whole sequence in one go and prints the
    `REGISTRY_ID=…` export line you'll need next:
    ```bash
@@ -135,10 +138,11 @@ Options:
 
 ## Conventions evaluator
 
-`ts/lib/conventions.ts` implements `isEffective(attestation, ctx)`:
-combines on-chain `active` with the `expires_at` and `requires` Display
-conventions documented in `CONVENTIONS.md`. The evaluator walks the
-`requires` graph; cycles are treated as ineffective.
+`ts/src/conventions.ts` implements `isEffective(attestation)`: an
+attestation is effective iff its `expires_at` Display convention (if present)
+is still in the future. Revocation is handled upstream by box membership — a
+revoked attestation is read from the revoked sink, not the active box — so it
+isn't part of this check. See `CONVENTIONS.md`.
 
 ## Branches
 
