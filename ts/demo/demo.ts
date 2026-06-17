@@ -5,9 +5,10 @@
  *   - audit the dependency (Attestation<Audit>, v1 schema)
  *   - audit the subject with AuditV2 (the upgrade-added schema)
  *   - list + pretty-print the attestations with their Display rendering
- *   - revoke the dependency's audit, and show it leave the dependency's active
- *     box (revocation is by box membership — revoked attestations move to a
- *     separate sink address and stop appearing in the active-box query)
+ *   - revoke the dependency's audit and the subject's v1 audit, and show them
+ *     leave the active box (revocation is by box membership — revoked
+ *     attestations move to a separate sink address and stop appearing in the
+ *     active-box query; the subject's AuditV2 stays as the live signal)
  *   - write `demo-ids.json` (registry id, subjects, trusted attesters) for the
  *     MVR Postgres seeder
  *
@@ -245,12 +246,15 @@ async function main(): Promise<void> {
     subjectAuditId = oneOf(ok, auditV2Type, 'Attestation<AuditV2>');
   }
 
-  console.log('\n▶ TX 3b — attest_audit on subject (score=88, stays effective)');
+  console.log('\n▶ TX 3b — attest_audit on subject (score=88, will be revoked)');
+  let subjectAuditV1Ref: { objectId: string; version: string; digest: string };
   {
     const tx = new Transaction();
     attestAuditTx(tx, { auditExamplePkg: pkgs.auditExample, registryId, subject, score: 88, reportUrl: 'https://audits.example.com/subject-v1.pdf' });
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
+    const id = oneOf(ok, auditType, 'Attestation<Audit>');
+    subjectAuditV1Ref = ok.createdRefs.get(id)!;
   }
 
   // Negative test data: two attestations a trust consumer must filter out — one
@@ -278,19 +282,25 @@ async function main(): Promise<void> {
   }
 
   // Revocation is by box membership: a revoked attestation is moved out of the
-  // subject's active box, so it stops appearing in this query.
-  const reportDepAudits = async (label: string) => {
-    const ids = (
-      await listAttestations(client, dependencyBox, { typeFilter: auditType })
-    ).map((a) => a.id);
-    console.log(
-      `\n▶ ${label}: Attestation<Audit> in dependency's active box = ${ids.length} ${JSON.stringify(ids)}`,
-    );
+  // active box, so it stops appearing in this query.
+  const reportActiveAudits = async (label: string) => {
+    for (const [who, box] of [
+      ['dependency', dependencyBox],
+      ['subject', subjectBox],
+    ] as const) {
+      const ids = (
+        await listAttestations(client, box, { typeFilter: auditType })
+      ).map((a) => a.id);
+      console.log(
+        `▶ ${label}: Attestation<Audit> in ${who}'s active box = ${ids.length} ${JSON.stringify(ids)}`,
+      );
+    }
   };
 
-  await reportDepAudits('Before revoke');
+  console.log('');
+  await reportActiveAudits('Before revoke');
 
-  console.log('\n▶ TX 5 — revoke the dependency audit (via AuditAdminCap)');
+  console.log("\n▶ TX 5 — revoke the dependency audit and the subject's v1 audit (via AuditAdminCap)");
   {
     const adminCapId = await findOwnedObject(client, sender, adminCapType);
     const tx = new Transaction();
@@ -300,11 +310,18 @@ async function main(): Promise<void> {
       boxId: dependencyBox,
       attestationRef: depAuditRef,
     });
+    revokeAuditTx(tx, {
+      auditExamplePkg: pkgs.auditExample,
+      adminCapId,
+      boxId: subjectBox,
+      attestationRef: subjectAuditV1Ref,
+    });
     const ok = await exec(client, signer, tx);
     console.log(`  digest: ${ok.digest}`);
   }
 
-  await reportDepAudits('After revoke');
+  console.log('');
+  await reportActiveAudits('After revoke');
 
   // Hand-off for the MVR Postgres seeder.
   const demoIds = {
