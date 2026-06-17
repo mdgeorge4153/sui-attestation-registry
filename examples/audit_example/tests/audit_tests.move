@@ -12,6 +12,12 @@ const ALICE: address = @0xA11CE;
 fun subject_for(addr: address): ID { addr.to_id() }
 fun report_url(): String { b"https://audits.example.com/r.pdf".to_string() }
 
+fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
+    object::id_from_address(
+        attestation_registry::box_address(registry, subject, revoked),
+    )
+}
+
 /// Verifies the cross-package attest flow: `audit_example::attest_audit`
 /// produces an accessible attestation, and `attester_of<Audit>` returns
 /// audit_example's package address — distinct from `attestation_registry`'s.
@@ -24,28 +30,29 @@ fun test_attest_audit_cross_package() {
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
     attestation_registry::create_box(&mut registry, subject);
+    let active = box_id(&registry, subject, false);
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
-    let registry: Registry = scenario.take_shared();
-    audit::attest_audit(&registry, subject, 9, report_url(), scenario.ctx());
-    test_scenario::return_shared(registry);
+    let active_box: Box = scenario.take_shared_by_id(active);
+    let admin = audit::new_admin_cap_for_testing(scenario.ctx());
+    audit::attest_audit(&admin, &active_box, 9, report_url(), scenario.ctx());
+    transfer::public_transfer(admin, ALICE);
+    test_scenario::return_shared(active_box);
 
     scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
+    let mut box: Box = scenario.take_shared_by_id(active);
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<Audit>>(
         object::id(&box),
     );
     let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(ids[0]);
-
     let a = attestation_registry::borrow_for_testing<Audit>(&mut box, rcv);
     assert!(a.subject() == subject, 0);
     assert!(a.data().score() == 9, 1);
     attestation_registry::put_back_for_testing(&mut box, a);
 
-    // attester_of<Audit> must resolve to audit_example's package address,
-    // not attestation_registry's. Compare against attester_of for a type
-    // defined in attestation_registry: they must differ.
+    // attester_of<Audit> must resolve to audit_example's package address, not
+    // attestation_registry's.
     let audit_pkg = attestation_registry::attester_of<Audit>();
     let registry_pkg = attestation_registry::attester_of<Registry>();
     assert!(audit_pkg != registry_pkg, 3);
@@ -54,8 +61,8 @@ fun test_attest_audit_cross_package() {
     scenario.end();
 }
 
-/// The admin-cap revocation policy: a holder of `AuditAdminCap` revokes an
-/// audit, moving it out of the active box and into the revoked sink.
+/// The admin-cap policy: a holder of `AuditAdminCap` issues then revokes an
+/// audit, moving it from the active box into the (claimed) revoked box.
 #[test]
 fun test_revoke_audit_with_admin_cap() {
     let subject = subject_for(@0xDEAD);
@@ -65,38 +72,49 @@ fun test_revoke_audit_with_admin_cap() {
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
     attestation_registry::create_box(&mut registry, subject);
+    let active = box_id(&registry, subject, false);
+    let revoked = box_id(&registry, subject, true);
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
-    let registry: Registry = scenario.take_shared();
-    audit::attest_audit(&registry, subject, 9, report_url(), scenario.ctx());
-    let sink = attestation_registry::revoked_box_address(&registry, subject);
-    test_scenario::return_shared(registry);
-
-    // Revoke with the admin cap.
-    scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
+    let active_box: Box = scenario.take_shared_by_id(active);
     let admin = audit::new_admin_cap_for_testing(scenario.ctx());
+    audit::attest_audit(&admin, &active_box, 9, report_url(), scenario.ctx());
+    test_scenario::return_shared(active_box);
+
+    scenario.next_tx(ALICE);
+    let box: Box = scenario.take_shared_by_id(active);
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<Audit>>(
         object::id(&box),
     );
     let id = ids[0];
-    let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(id);
-    audit::revoke_audit(&admin, &mut box, rcv);
-    transfer::public_transfer(admin, ALICE);
     test_scenario::return_shared(box);
 
-    // The audit left the active box for the revoked sink.
     scenario.next_tx(ALICE);
-    let box: Box = scenario.take_shared();
+    let mut active_box: Box = scenario.take_shared_by_id(active);
+    let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(id);
+    audit::revoke_audit(&admin, &mut active_box, rcv);
+    transfer::public_transfer(admin, ALICE);
+    test_scenario::return_shared(active_box);
+
+    // The audit left the active box for the revoked box.
+    scenario.next_tx(ALICE);
+    let active_box: Box = scenario.take_shared_by_id(active);
     assert!(
         test_scenario::receivable_object_ids_for_owner_id<Attestation<Audit>>(
-            object::id(&box),
+            object::id(&active_box),
         ).is_empty(),
         0,
     );
-    assert!(test_scenario::has_most_recent_for_address<Attestation<Audit>>(sink), 1);
-    test_scenario::return_shared(box);
+    test_scenario::return_shared(active_box);
+    let revoked_box: Box = scenario.take_shared_by_id(revoked);
+    assert!(
+        test_scenario::receivable_object_ids_for_owner_id<Attestation<Audit>>(
+            object::id(&revoked_box),
+        ).length() == 1,
+        1,
+    );
+    test_scenario::return_shared(revoked_box);
 
     scenario.end();
 }

@@ -14,11 +14,11 @@ public struct Audit has store, drop {
     report_url: String,
 }
 
-/// Single-party revocation authority: whoever holds this cap can revoke *any*
-/// `Attestation<Audit>` (and `AuditV2`) from this auditor. Created once at
-/// publish and transferred to the publisher. This is one revocation-policy
-/// choice among many — the base registry prescribes none; each schema picks
-/// its own and supplies the `Permit` the registry's `revoke` requires.
+/// Single-party authority to *control* this auditor's attestations: whoever
+/// holds this cap can both issue and revoke any `Attestation<Audit>` (and
+/// `AuditV2`). Created once at publish and transferred to the publisher. This
+/// is one authority-policy choice among many — the base registry prescribes
+/// none; each schema picks its own and supplies the `Permit` `revoke` requires.
 public struct AuditAdminCap has key, store {
     id: UID,
 }
@@ -32,14 +32,16 @@ fun init(ctx: &mut TxContext) {
 /// Should be called once shortly after publish; aborts on second call
 /// (V2 enforcement via `display_registry`).
 public fun register_audit_display(
+    registry: &Registry,
     display_registry: &mut DisplayRegistry,
     ctx: &mut TxContext,
 ) {
     attestation_registry::register_display<Audit>(
+        registry,
         display_registry,
         vector[
-            name_field(),
-            description_field(),
+            b"name".to_string(),
+            b"description".to_string(),
             b"link".to_string(),
         ],
         vector[
@@ -52,27 +54,20 @@ public fun register_audit_display(
     );
 }
 
-/// Issue an Audit attestation about `subject`. Revocable via `revoke_audit`
-/// (the returned attestation id is unused here — the `AuditAdminCap` is the
-/// authority, not a per-attestation cap).
+/// Issue an Audit attestation into `box` (the subject's active box). Gated by
+/// the `AuditAdminCap`, the single authority over this auditor's attestations.
 public fun attest_audit(
-    registry: &Registry,
-    subject: ID,
+    _: &AuditAdminCap,
+    box: &Box,
     score: u8,
     report_url: String,
     ctx: &mut TxContext,
 ) {
-    attestation_registry::attest<Audit>(
-        registry,
-        subject,
-        Audit { score, report_url },
-        ctx,
-    );
+    attestation_registry::attest<Audit>(box, Audit { score, report_url }, ctx);
 }
 
-/// Revoke an `Attestation<Audit>`. Single-party: any holder of the
-/// `AuditAdminCap` can revoke any audit. Mints the `Permit<Audit>` the
-/// registry's `revoke` requires (only this module can).
+/// Revoke an `Attestation<Audit>`. Gated by the `AuditAdminCap`; mints the
+/// `Permit<Audit>` the registry's `revoke` requires (only this module can).
 public fun revoke_audit(
     _: &AuditAdminCap,
     box: &mut Box,
@@ -83,9 +78,6 @@ public fun revoke_audit(
 
 /// The numeric audit score.
 public fun score(self: &Audit): u8 { self.score }
-
-fun name_field(): String { b"name".to_string() }
-fun description_field(): String { b"description".to_string() }
 
 #[test_only]
 public fun new_admin_cap_for_testing(ctx: &mut TxContext): AuditAdminCap {

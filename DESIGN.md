@@ -27,25 +27,25 @@ see `FUTURE-EXTENSIONS.md`. For the comparison with SIP-56, see
 
 ```
 Registry (shared singleton)
-  ├── BoxKey{subject, revoked:false} → active Box   → owns un-revoked Attestation<T> (TTO)
-  └── BoxKey{subject, revoked:true}  → revoked sink → owns revoked Attestation<T>
+  ├── BoxKey{subject, revoked:false} → active Box  → owns un-revoked Attestation<T> (TTO)
+  └── BoxKey{subject, revoked:true}  → revoked Box → owns revoked Attestation<T> (TTO)
 ```
 
 - **`Registry`** is a `key`-only shared singleton, created in `init`.
   Its UID is the parent for all per-subject boxes.
-- **`Box`** is `key`-only and per-subject — the subject's *active* box.
-  Its address is `derived_object::derive_address(registry, BoxKey {
-  subject, revoked: false })` — *computable off-chain* from
-  `(registry_id, subject_id)`. Off-chain consumers fetch every un-revoked
-  attestation about a subject from this single address via
-  `getOwnedObjects(box_addr, filter={StructType: ...})`, with native
-  server-side type filtering.
-- **Revoked sink.** The sibling address `derive_address(registry, BoxKey {
-  subject, revoked: true })` is a bare address (never claimed) that
-  `revoke` moves attestations to (see "Revocation"). Enumerating the
-  active box therefore yields exactly the un-revoked set, with no
-  per-object status flag to read; the sink is read separately to list
-  revoked attestations.
+- **`Box`** is `key`-only and per-subject. Each subject has two, claimed
+  together by `create_box`: the *active* box (`key.revoked == false`) and
+  the *revoked* box (`key.revoked == true`). The active box's address is
+  `derived_object::derive_address(registry, BoxKey { subject, revoked:
+  false })` — *computable off-chain* from `(registry_id, subject_id)`.
+  Off-chain consumers fetch every un-revoked attestation about a subject
+  from that address via `getOwnedObjects(box_addr, filter={StructType:
+  ...})`, with native server-side type filtering.
+- **Revoked box.** The sibling box (`revoked: true`) is where `revoke`
+  moves attestations (see "Revocation"). Enumerating the active box yields
+  exactly the un-revoked set, with no per-object status flag to read; the
+  revoked box is read separately to list revoked attestations, and an
+  attestation's status is the `revoked` of whichever box owns it.
 - **`Attestation<T: store>`** is `key`-only, owned by the active Box via
   `transfer::transfer(attestation, box.id.to_address())`.
 
@@ -69,11 +69,11 @@ patterns we deferred.
 
 The Box object exists for two reasons:
 
-- It carries a `subject: ID` field, so a viewer who inspects the Box
-  directly knows what it's about without separately knowing the
-  `(registry, subject)` pair that derived its address.
+- It carries its `BoxKey` (`subject` + `revoked`), so a viewer who
+  inspects the Box knows what it's about and whether it's the active or
+  revoked box, and the address it should live at is recomputable.
 - It carries the parent `registry: ID`, so `revoke` can derive the
-  revoked-sink address from the Box alone — no `&Registry` argument.
+  sibling (revoked) box's address from the Box alone — no `&Registry`.
 - `transfer::receive` requires a `&mut UID` for the parent. Without an
   actual object at the derived address, there's no UID to borrow; you
   couldn't revoke (or do anything else that needs to take an attestation
@@ -103,18 +103,19 @@ and even if they did:
 
 The only legal disposition of an `Attestation<T>` is through this module's
 `revoke`, which receives it from the active Box and transfers it to the
-subject's revoked sink. Bytecode-enforced; no discipline note required.
+subject's revoked Box. Bytecode-enforced; no discipline note required.
 
 ## Revocation status by box membership, not a field
 
 The attestation carries no status field at all. Revocation is encoded by
 *which* box owns it: live attestations sit in the subject's active box, and
-`revoke` moves an attestation out to the revoked sink (see "Revocation").
-We tried an on-chain `enum Status` and then an `active: bool` flag during
-earlier iterations; both made every off-chain read pay a per-object status
-filter. Encoding status in the address the attestation lives at removes
-that: enumerating the active box returns exactly the un-revoked set, the
-revoked sink returns exactly the revoked set, and the struct stays `{ id,
+`revoke` moves an attestation to the revoked box (see "Revocation"). Since
+each Box stores its own `BoxKey`, an attestation's status is also readable
+on-chain from its owner — `box_revoked(owner)`. We tried an on-chain `enum
+Status` and then an `active: bool` flag during earlier iterations; both made
+every off-chain read pay a per-object status filter. Encoding status as box
+membership removes that: enumerating the active box returns exactly the
+un-revoked set, the revoked box the revoked set, and the struct stays `{ id,
 subject, data }`.
 
 ## Attester identity: from `T`'s package, not the signer
@@ -153,13 +154,15 @@ race to register `Display<Attestation<T>>` for any T).
 ## Revocation: `Permit<T>`-gated, policy in the schema
 
 ```move
-public fun attest<T: store>(registry, subject, data, ctx): ID
+public fun attest<T: store>(box: &Box, data, ctx): ID
 public fun revoke<T: store>(box: &mut Box, _: Permit<T>, rcv: Receiving<Attestation<T>>)
 ```
 
-`revoke` receives the attestation from its active `Box` and transfers it to
-the subject's revoked sink (derived from the Box's stored `registry` id).
-The move and the `Revoked<T>` event live here, uniform across every
+`attest` takes the subject's active `Box` (and aborts if handed the revoked
+one). `revoke` receives the attestation from the active `Box` and transfers
+it to the subject's revoked `Box`, whose address it derives from the Box's
+stored `registry` id. The move and the `Revoked<T>` event live here, uniform
+across every
 attestation type — but the *authority* to call it does not. `revoke` is
 gated by `Permit<T>`, which only `T`'s defining module can mint, so the
 registry prescribes no revocation policy. Each schema decides who may
@@ -176,38 +179,28 @@ This splits the two things a built-in bearer cap used to bundle: the
 every policy, including the exact per-attestation bearer cap, is
 reconstructable schema-side (see "Schema-level patterns").
 
-Revocation is **terminal in the current bytecode** — the revoked sink is
-never claimed, so there's no `&mut UID` to receive a revoked attestation
-back — but it is not cryptographically permanent: a future upgrade could
-claim the sink key and receive the objects (e.g. to un-revoke). The one
+Revocation is **terminal in the current bytecode** — no function un-revokes —
+but it is not cryptographically permanent: the revoked box is a real shared
+object, so a future upgrade could add a function that receives an attestation
+back out of it. The one
 property the design gives up is bytecode-provable *irrevocability*: a
 schema is permanent only by exposing no revoke path, which a later upgrade
 could add. That's weaker than burning a cap, but upgrade authority is
 already attestation-dynamics authority, so it composes.
 
-## Display registration and the freeze-the-wrapper pattern
+## Display registration: park the DisplayCap on the Registry
 
-```move
-public struct DisplayLock<T: store> has key {
-    id: UID,
-    cap: display_registry::DisplayCap<Attestation<T>>,
-}
-```
+`register_display<T>(...)` creates the `Display<Attestation<T>>`, applies the
+fields the schema passed in, shares the Display, then transfers the
+`DisplayCap` to the `Registry`'s address (TTO).
 
-`register_display<T>(...)` creates the Display, applies the fields the
-schema passed in, shares the Display, then **freezes a `DisplayLock<T>`**
-containing the `DisplayCap`.
-
-The DisplayCap is the cap that authorizes `set`/`unset`/`clear` on the
-Display, so locking it makes the Display content permanently immutable.
-The `cap` field is module-private; freezing the wrapper makes it
-immovable; together that's equivalent to destroying the cap (which the
-framework doesn't expose a way to do directly).
-
-This is the same freeze-a-wrapper pattern SIP-56's PR-evolved design
-uses (`AttestationType<T>` wraps `DisplayCap` and freezes). The
-mechanisms are the same; we just don't reuse the wrapper for further
-authorization.
+The DisplayCap authorizes `set`/`unset`/`clear` on the Display, so the
+template is meant to be immutable — but the framework exposes no way to
+destroy a DisplayCap. Parking it on the Registry keeps it out of circulation
+(it can't be used to mutate the Display from there) without minting an extra
+immovable wrapper object, and a future upgrade could destroy it if a
+`DisplayCap::destroy` ever lands. (An earlier iteration froze a wrapper struct
+around the cap instead; owning it on the Registry is simpler.)
 
 ## Events: phantom T, minimal payload
 

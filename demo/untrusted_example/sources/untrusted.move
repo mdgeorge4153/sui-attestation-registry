@@ -7,7 +7,7 @@ module untrusted_example::untrusted;
 
 use std::string::String;
 use sui::display_registry::DisplayRegistry;
-use attestation_registry::attestation_registry::{Self, Registry};
+use attestation_registry::attestation_registry::{Self, Registry, Box};
 
 /// Payload of an attestation from an untrusted attester.
 public struct Untrusted has store, drop {
@@ -18,10 +18,12 @@ public struct Untrusted has store, drop {
 /// is well-formed — the consumer must reject it on the attester, not on a
 /// missing Display.
 public fun register_untrusted_display(
+    registry: &Registry,
     display_registry: &mut DisplayRegistry,
     ctx: &mut TxContext,
 ) {
     attestation_registry::register_display<Untrusted>(
+        registry,
         display_registry,
         vector[b"name".to_string(), b"description".to_string()],
         vector[
@@ -33,18 +35,8 @@ public fun register_untrusted_display(
     );
 }
 
-/// Issue an Untrusted attestation about `subject` (negative test data;
-/// unrevocable — no revoke wrapper exposed).
-public fun attest_untrusted(
-    registry: &Registry,
-    subject: ID,
-    note: String,
-    ctx: &mut TxContext,
-) {
-    attestation_registry::attest<Untrusted>(
-        registry,
-        subject,
-        Untrusted { note },
-        ctx,
-    );
+/// Issue an Untrusted attestation into `box` (negative test data; unrevocable
+/// — no revoke wrapper exposed).
+public fun attest_untrusted(box: &Box, note: String, ctx: &mut TxContext) {
+    attestation_registry::attest<Untrusted>(box, Untrusted { note }, ctx);
 }

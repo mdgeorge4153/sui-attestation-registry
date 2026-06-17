@@ -155,7 +155,7 @@ else
         if ! (cd "$AUDIT_DIR" && \
                 "$SUI" client call \
                     --package "$pkg" --module "$module" --function "$func" \
-                    --args "$DISPLAY_REGISTRY" \
+                    --args "$REGISTRY_ID" "$DISPLAY_REGISTRY" \
                     --gas-budget "$GAS_BUDGET" >/dev/null 2>&1); then
             echo "  FAILED (Display may already exist for this type)"
         else

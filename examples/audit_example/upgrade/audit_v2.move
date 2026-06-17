@@ -26,10 +26,12 @@ public struct AuditV2 has store, drop {
 /// One-shot setup: register the immutable `Display<Attestation<AuditV2>>`,
 /// including the `link` convention field.
 public fun register_audit_v2_display(
+    registry: &Registry,
     display_registry: &mut DisplayRegistry,
     ctx: &mut TxContext,
 ) {
     attestation_registry::register_display<AuditV2>(
+        registry,
         display_registry,
         vector[
             b"name".to_string(),
@@ -49,18 +51,13 @@ public fun register_audit_v2_display(
 /// Issue an AuditV2 attestation about `subject`. Revocable via
 /// `revoke_audit_v2` (same `AuditAdminCap` as v1 audits).
 public fun attest_audit_v2(
-    registry: &Registry,
-    subject: ID,
+    _: &AuditAdminCap,
+    box: &Box,
     score: u8,
     report_url: String,
     ctx: &mut TxContext,
 ) {
-    attestation_registry::attest<AuditV2>(
-        registry,
-        subject,
-        AuditV2 { score, report_url },
-        ctx,
-    );
+    attestation_registry::attest<AuditV2>(box, AuditV2 { score, report_url }, ctx);
 }
 
 /// Revoke an `Attestation<AuditV2>`, reusing the auditor's `AuditAdminCap`
@@ -92,16 +89,6 @@ public struct InternalNote has store, drop {
 /// Issue an InternalNote attestation. No Display is registered for
 /// `Attestation<InternalNote>`, so Display-gating consumers ignore it.
 /// Unrevocable — this schema exposes no revoke wrapper (negative test data).
-public fun attest_internal_note(
-    registry: &Registry,
-    subject: ID,
-    text: String,
-    ctx: &mut TxContext,
-) {
-    attestation_registry::attest<InternalNote>(
-        registry,
-        subject,
-        InternalNote { text },
-        ctx,
-    );
+public fun attest_internal_note(box: &Box, text: String, ctx: &mut TxContext) {
+    attestation_registry::attest<InternalNote>(box, InternalNote { text }, ctx);
 }

@@ -9,7 +9,7 @@ use attestation_registry::attestation_registry::{
     Box,
     Attestation,
     EBoxAlreadyExists,
-    EBoxDoesNotExist,
+    EBoxRevoked,
 };
 
 const ALICE: address = @0xA11CE;
@@ -22,8 +22,8 @@ public struct TestSchema has store, drop {
 
 fun subject_for(addr: address): ID { addr.to_id() }
 
-/// Drive a scenario forward to the state where `Box` for `subject` is shared
-/// and ready to be `take_shared`'d.
+/// Create both of `subject`'s boxes (active + revoked); leaves the scenario at
+/// a fresh tx.
 fun setup_with_box(subject: ID): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ALICE);
     attestation_registry::init_for_testing(scenario.ctx());
@@ -35,6 +35,13 @@ fun setup_with_box(subject: ID): test_scenario::Scenario {
 
     scenario.next_tx(ALICE);
     scenario
+}
+
+/// The object id of `subject`'s active or revoked box.
+fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
+    object::id_from_address(
+        attestation_registry::box_address(registry, subject, revoked),
+    )
 }
 
 #[test, expected_failure(abort_code = EBoxAlreadyExists)]
@@ -51,21 +58,20 @@ fun test_create_box_aborts_on_duplicate() {
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = EBoxDoesNotExist)]
-fun test_attest_aborts_when_box_missing() {
+/// `attest` rejects the revoked box — only the active box accepts attestations.
+#[test, expected_failure(abort_code = EBoxRevoked)]
+fun test_attest_aborts_on_revoked_box() {
     let subject = subject_for(@0xDEAD);
-    let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
+    let mut scenario = setup_with_box(subject);
+
+    let registry: Registry = scenario.take_shared();
+    let revoked = box_id(&registry, subject, true);
+    test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
-    let registry: Registry = scenario.take_shared();
-    attestation_registry::attest<TestSchema>(
-        &registry,
-        subject,
-        TestSchema { tag: 1 },
-        scenario.ctx(),
-    );
-    test_scenario::return_shared(registry);
+    let revoked_box: Box = scenario.take_shared_by_id(revoked);
+    attestation_registry::attest<TestSchema>(&revoked_box, TestSchema { tag: 1 }, scenario.ctx());
+    test_scenario::return_shared(revoked_box);
     scenario.end();
 }
 
@@ -75,28 +81,26 @@ fun test_attest_and_read() {
     let mut scenario = setup_with_box(subject);
 
     let registry: Registry = scenario.take_shared();
-    attestation_registry::attest<TestSchema>(
-        &registry,
-        subject,
-        TestSchema { tag: 42 },
-        scenario.ctx(),
-    );
+    let active = box_id(&registry, subject, false);
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
+    let active_box: Box = scenario.take_shared_by_id(active);
+    attestation_registry::attest<TestSchema>(&active_box, TestSchema { tag: 42 }, scenario.ctx());
+    test_scenario::return_shared(active_box);
+
+    scenario.next_tx(ALICE);
+    let mut box: Box = scenario.take_shared_by_id(active);
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
         object::id(&box),
     );
     assert!(ids.length() == 1, 0);
     let rcv: Receiving<Attestation<TestSchema>> =
         test_scenario::receiving_ticket_by_id(ids[0]);
-
     let a = attestation_registry::borrow_for_testing<TestSchema>(&mut box, rcv);
     assert!(a.subject() == subject, 1);
     assert!(a.data().tag == 42, 2);
     attestation_registry::put_back_for_testing(&mut box, a);
-
     test_scenario::return_shared(box);
     scenario.end();
 }
@@ -107,18 +111,17 @@ fun test_reissuance_succeeds() {
     let mut scenario = setup_with_box(subject);
 
     let registry: Registry = scenario.take_shared();
-    attestation_registry::attest<TestSchema>(
-        &registry, subject, TestSchema { tag: 1 },
-        scenario.ctx(),
-    );
-    attestation_registry::attest<TestSchema>(
-        &registry, subject, TestSchema { tag: 2 },
-        scenario.ctx(),
-    );
+    let active = box_id(&registry, subject, false);
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
-    let box: Box = scenario.take_shared();
+    let active_box: Box = scenario.take_shared_by_id(active);
+    attestation_registry::attest<TestSchema>(&active_box, TestSchema { tag: 1 }, scenario.ctx());
+    attestation_registry::attest<TestSchema>(&active_box, TestSchema { tag: 2 }, scenario.ctx());
+    test_scenario::return_shared(active_box);
+
+    scenario.next_tx(ALICE);
+    let box: Box = scenario.take_shared_by_id(active);
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
         object::id(&box),
     );
@@ -129,61 +132,61 @@ fun test_reissuance_succeeds() {
 }
 
 /// Revocation moves the attestation out of the active box and into the
-/// subject's revoked sink: the active box empties, the sink (a bare address)
-/// now owns it.
+/// subject's (claimed) revoked box.
 #[test]
-fun test_revoke_moves_attestation_to_sink() {
+fun test_revoke_moves_to_revoked_box() {
     let subject = subject_for(@0xDEAD);
     let mut scenario = setup_with_box(subject);
 
     let registry: Registry = scenario.take_shared();
-    attestation_registry::attest<TestSchema>(
-        &registry, subject, TestSchema { tag: 7 },
-        scenario.ctx(),
-    );
-    let sink = attestation_registry::revoked_box_address(&registry, subject);
+    let active = box_id(&registry, subject, false);
+    let revoked = box_id(&registry, subject, true);
     test_scenario::return_shared(registry);
 
-    // Pre-revoke: the attestation is in the active box; the sink is empty.
     scenario.next_tx(ALICE);
-    let box: Box = scenario.take_shared();
+    let active_box: Box = scenario.take_shared_by_id(active);
+    attestation_registry::attest<TestSchema>(&active_box, TestSchema { tag: 7 }, scenario.ctx());
+    test_scenario::return_shared(active_box);
+
+    scenario.next_tx(ALICE);
+    let box: Box = scenario.take_shared_by_id(active);
     let ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
         object::id(&box),
     );
-    assert!(ids.length() == 1, 0);
-    let id = ids[0];
-    assert!(!test_scenario::has_most_recent_for_address<Attestation<TestSchema>>(sink), 1);
+    let att_id = ids[0];
     test_scenario::return_shared(box);
 
-    // Revoke. The test module defines `TestSchema`, so it can mint the
-    // `Permit<TestSchema>` the registry's `revoke` requires.
+    // Revoke from the active box. This module defines `TestSchema`, so it can
+    // mint the `Permit<TestSchema>` the registry's `revoke` requires.
     scenario.next_tx(ALICE);
-    let mut box: Box = scenario.take_shared();
-    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(id);
+    let mut active_box: Box = scenario.take_shared_by_id(active);
+    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(att_id);
     attestation_registry::revoke<TestSchema>(
-        &mut box, std::internal::permit<TestSchema>(), rcv,
+        &mut active_box, std::internal::permit<TestSchema>(), rcv,
     );
-    test_scenario::return_shared(box);
+    test_scenario::return_shared(active_box);
 
-    // Post-revoke: the active box no longer holds it; the sink now does.
+    // Active box empty; the revoked box now owns the attestation.
     scenario.next_tx(ALICE);
-    let box: Box = scenario.take_shared();
+    let active_box: Box = scenario.take_shared_by_id(active);
     assert!(
         test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
-            object::id(&box),
+            object::id(&active_box),
         ).is_empty(),
-        2,
+        0,
     );
-    assert!(test_scenario::has_most_recent_for_address<Attestation<TestSchema>>(sink), 3);
-    test_scenario::return_shared(box);
+    test_scenario::return_shared(active_box);
+
+    let revoked_box: Box = scenario.take_shared_by_id(revoked);
+    let revoked_ids = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
+        object::id(&revoked_box),
+    );
+    assert!(revoked_ids.length() == 1, 1);
+    assert!(revoked_ids[0] == att_id, 2);
+    test_scenario::return_shared(revoked_box);
 
     scenario.end();
 }
-
-// Revocation authority is no longer the base registry's concern (it gates
-// `revoke` on `Permit<T>` and leaves the policy to the schema), so any
-// per-attestation cap-mismatch policy is tested by the schema that
-// reconstructs that bearer-cap pattern, not here.
 
 // `register_display` cannot be unit-tested here: it needs the system
 // `DisplayRegistry` (shared at `0xd`), and the only way to create one in tests

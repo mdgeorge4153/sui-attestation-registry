@@ -144,13 +144,6 @@ is still in the future. Revocation is handled upstream by box membership — a
 revoked attestation is read from the revoked sink, not the active box — so it
 isn't part of this check. See `CONVENTIONS.md`.
 
-## Branches
-
-- `mdgeorge/draft` — TTO mainline (current).
-- `mdgeorge/box-dof-reference` — DOF-storage snapshot from an earlier design
-  iteration; preserved for comparison. See the commit log for the rationale
-  for moving to TTO.
-
 ## Further reading
 
 - `CONVENTIONS.md` — schema-level conventions for cross-cutting behaviors.

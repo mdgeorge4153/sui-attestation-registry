@@ -1,16 +1,16 @@
 import { Transaction } from '@mysten/sui/transactions';
 
 /**
- * Append `audit_example::audit::attest_audit(registry, subject, score,
- * report_url)` to `tx`. Audits are revoked via the auditor's `AuditAdminCap`
- * (see `revokeAuditTx`), not a per-attestation cap, so this returns nothing.
+ * Append `audit_example::audit::attest_audit(admin, box, score, report_url)` to
+ * `tx`. Gated by the auditor's `AuditAdminCap`; `boxId` is the subject's active
+ * box. Returns nothing.
  */
 export function attestAuditTx(
   tx: Transaction,
   args: {
     auditExamplePkg: string;
-    registryId: string;
-    subject: string;
+    adminCapId: string;
+    boxId: string;
     score: number;
     reportUrl: string;
   },
@@ -18,8 +18,8 @@ export function attestAuditTx(
   tx.moveCall({
     target: `${args.auditExamplePkg}::audit::attest_audit`,
     arguments: [
-      tx.object(args.registryId),
-      tx.pure.id(args.subject),
+      tx.object(args.adminCapId),
+      tx.object(args.boxId),
       tx.pure.u8(args.score),
       tx.pure.string(args.reportUrl),
     ],
@@ -27,19 +27,18 @@ export function attestAuditTx(
 }
 
 /**
- * Append `audit_example::audit_v2::attest_audit_v2(registry, subject, score,
- * report_url)` to `tx`.
+ * Append `audit_example::audit_v2::attest_audit_v2(admin, box, score,
+ * report_url)` to `tx`. Gated by the same `AuditAdminCap`.
  *
  * `auditExamplePkg` must be the *upgraded* (v2) package id, since that is
- * where the `audit_v2` module is defined. Returns nothing (revoked via the
- * shared `AuditAdminCap`).
+ * where the `audit_v2` module is defined.
  */
 export function attestAuditV2Tx(
   tx: Transaction,
   args: {
     auditExamplePkg: string;
-    registryId: string;
-    subject: string;
+    adminCapId: string;
+    boxId: string;
     score: number;
     reportUrl: string;
   },
@@ -47,8 +46,8 @@ export function attestAuditV2Tx(
   tx.moveCall({
     target: `${args.auditExamplePkg}::audit_v2::attest_audit_v2`,
     arguments: [
-      tx.object(args.registryId),
-      tx.pure.id(args.subject),
+      tx.object(args.adminCapId),
+      tx.object(args.boxId),
       tx.pure.u8(args.score),
       tx.pure.string(args.reportUrl),
     ],
