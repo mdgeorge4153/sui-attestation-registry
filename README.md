@@ -16,37 +16,47 @@ packages/
   attestation_registry/       — the only deployable: Registry, Box, Attestation
 examples/                     — reusable schema patterns for third-party attesters
   audit_example/              — sample schema: Audit { score: u8 } (+ AuditV2 upgrade)
+  auditor_b/                  — a second auditor (same source as audit_example),
+                                deliberately NOT in the trusted set
 demo/                         — fixtures that exist only to drive the local demo
   dependency_example/         — a subject; dependency of subject_example
   subject_example/            — the browsed subject (depends on dependency_example)
-  untrusted_example/          — an attester deliberately NOT in the trusted set
+scripts/                      — shell demo: run-demo.sh + composable ptb ops (ops/)
 ts/
   src/                        — client SDK: Box derivation, queries, conventions evaluator
   examples/audit.ts           — auditor-side PTB builders for the audit_example schema
-  demo/                       — end-to-end CLI + dev tooling
 CONVENTIONS.md                — Display-field conventions (expires_at, …)
 FUTURE-EXTENSIONS.md          — design memos for surfaces deliberately deferred from v0
 ```
 
 ## Concepts in one paragraph
 
-A `Registry` is a shared singleton, parent of one `Box` per attestation
-subject. The Box's address is `derived_object::derive_address(registry, subject)`
-— computable off-chain — so consumers can enumerate every attestation about
-a subject via `getOwnedObjects(box_address, filter={StructType: …})`, with
+```
+Registry (shared singleton)
+  └── Box (per subject; active + revoked) ──owns──▶ Attestation<T> (TTO)
+```
+
+A `Registry` is a shared singleton, parent of two `Box`es per subject — an
+*active* box and a *revoked* box. A box's address is
+`derived_object::derive_address(registry, BoxKey { subject, revoked })` —
+computable off-chain — so consumers enumerate every un-revoked attestation about
+a subject via `getOwnedObjects(active_box, filter={StructType: …})`, with
 server-side type filtering. Each `Attestation<T>` is owned by its Box via
-transfer-to-object. Attestations are issued by `attestation_registry::attest`;
-constructing the `T` value it takes is already restricted by Move to `T`'s
-defining package, so the recorded attester is `T`'s package — bound to the
-type at compile time, not denormalized into a field. Revocation moves an
-attestation from its subject's active box to a separate revoked-sink address
-and is gated by `Permit<T>`, which only `T`'s package can mint — so each
-schema defines its own revocation authority (an admin cap, a per-attestation
-bearer cap, or none at all). Time-based effectiveness (expiration) and other
-cross-cutting concerns sit in the Display layer per the conventions in
-`CONVENTIONS.md` — the registry itself stays minimal. ("Negative"
-attestations — vulnerability disclosures that propagate from a dependency to
-its dependents — are a planned fast-follow, not in this positive MVP.)
+transfer-to-object.
+
+The key design feature is that **the schema package has complete control over
+its attestations.** Constructing the `T` in `Attestation<T>` is restricted by
+Move to `T`'s defining package, so only that package can `attest`, and only it
+can mint the `Permit<T>` that gates `revoke` and `register_display`. The
+recorded attester is therefore `T`'s package — bound to the type at compile
+time, not denormalized into a field — and each schema defines its own revocation
+authority (an admin cap, a per-attestation bearer cap, or none at all).
+Revocation moves an attestation from the subject's active box to its revoked
+box. Time-based effectiveness (expiration) and other cross-cutting concerns sit
+in the Display layer per `CONVENTIONS.md` — the registry itself stays minimal.
+("Negative" attestations — vulnerability disclosures that propagate from a
+dependency to its dependents — are a planned fast-follow, not in this positive
+MVP.)
 
 ## Building and testing
 
@@ -117,16 +127,15 @@ Prerequisites:
    export REGISTRY_ID=0x…
    ```
 
-Then:
+Then run the demo (it reads `Pub.localnet.toml` and `REGISTRY_ID`):
 
 ```bash
-cd ts
-pnpm install
-pnpm demo
+bash scripts/demo.sh
 ```
 
-The demo prints transaction digests and the rendered Display for each
-attestation before and after the revoke.
+`scripts/demo.sh` composes the `scripts/ops/` CLI ops (create-box, attest-audit,
+revoke-audit): it creates the boxes, issues the audits, revokes two of them, and
+writes `demo-ids.json` for the MVR seeder, printing each step's object ids.
 
 Options:
 
@@ -141,11 +150,11 @@ Options:
 `ts/src/conventions.ts` implements `isEffective(attestation)`: an
 attestation is effective iff its `expires_at` Display convention (if present)
 is still in the future. Revocation is handled upstream by box membership — a
-revoked attestation is read from the revoked sink, not the active box — so it
+revoked attestation is read from the revoked box, not the active box — so it
 isn't part of this check. See `CONVENTIONS.md`.
 
 ## Further reading
 
 - `CONVENTIONS.md` — schema-level conventions for cross-cutting behaviors.
-- `FUTURE-EXTENSIONS.md` — on-chain inspection APIs (borrow/put_back,
-  data-by-copy) deferred from v0 with the design memos preserved.
+- `FUTURE-EXTENSIONS.md` — the deferred on-chain inspection API (borrow/put_back
+  hot potato) with the design memo preserved.

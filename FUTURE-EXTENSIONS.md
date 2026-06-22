@@ -8,11 +8,12 @@ didn't include it, and what concrete use case would justify adding it.
 
 The shipped registry has no public surface for reading an attestation's data
 or status from Move code. The only public functions touching `Attestation<T>`
-by value are `attest` (constructs) and `revoke` (consumes via
-`transfer::receive`, flips `active`, transfers back). Accessors
-(`subject`, `data`, `is_active`) exist but are unreachable from outside the
-package because there's no public function that returns an
-`Attestation<T>` or hands out a `&Attestation<T>`.
+by value are `attest` (constructs) and `revoke` (receives via
+`transfer::receive` and moves the attestation to the subject's revoked box).
+Accessors (`subject`, `data`) exist but are unreachable from outside the package
+because no public function returns an `Attestation<T>` or hands out a
+`&Attestation<T>`. An attestation's status is which box owns it
+(`box_revoked`), not a field on the attestation.
 
 This is intentional. We don't have a concrete on-chain consumer (verifier
 contract, compositional attestation, gating contract) in the PoC, so the
@@ -48,11 +49,14 @@ public fun put_back<T: store>(
 public fun revoke<T: store>(
     box: &mut Box,
     attestation: Attestation<T>,
-    cap: RevocationCap<T>,
+    _: Permit<T>,
     borrow: AttestationBorrow,
     ctx: &TxContext,
 );
 ```
+
+(A hypothetical future shape — gated by `Permit<T>` like the shipped `revoke`,
+but taking the attestation by value after a `borrow`.)
 
 Hot potato has no abilities, so the borrow checker forces every code path to
 discharge it via one of `put_back` / `revoke`. The hot potato carries
@@ -62,43 +66,26 @@ being discharged matches what was opened (with an `EBorrowMismatch` code).
 Modeled on `sui::borrow::Referent` / `Borrow`. Bytecode-enforced, no
 discipline note required.
 
-### `read_data<T: copy>` alternative
+### Why not a `T: copy` read-by-copy shape
 
-When `T: copy`, a simpler one-call shape works:
+A simpler one-call `data<T: store + copy>(box, rcv): T` that receives the
+attestation, copies its payload out, and transfers it back was considered and
+**rejected** — not merely deferred. Requiring `T: copy` would let anyone who can
+reach an attestation copy its payload out and re-mint it: reissue an attestation
+after it was revoked, or mint one with a different timestamp — defeating the
+uniqueness and permanence the `key`-only design guarantees. The hot-potato
+pattern keeps the attestation a single, non-copyable object throughout, so it is
+the only viable inspection shape.
 
-```move
-public fun data<T: store + copy>(
-    box: &mut Box,
-    rcv: Receiving<Attestation<T>>,
-): T {
-    let a = transfer::receive(&mut box.id, rcv);
-    let d = *a.data();
-    transfer::transfer(a, box.id.to_address());
-    d
-}
-```
-
-Returns the payload by copy; the function handles the
-receive-then-transfer-back internally. Simpler API surface than the hot
-potato; loses the ability to inspect `active`/`subject` in the same call
-(would require additional functions or a snapshot struct).
-
-### Why the choice between the two
-
-- **Hot potato**: more general (works for `T: store`, no `copy` requirement),
-  more bytecode-enforced invariants, more API surface.
-- **`data` by copy**: simpler, restricted to `T: copy` schemas.
-
-Pick the shape that matches the actual consumer. Both incur the same
-`&mut Box` serialization cost because `transfer::receive` requires
-`&mut UID` — concurrent on-chain reads against the same subject serialize
-on the Box object regardless.
+The hot potato incurs a `&mut Box` serialization cost because
+`transfer::receive` requires `&mut UID` — concurrent on-chain reads against the
+same subject serialize on the Box object regardless.
 
 ### Concrete use cases that would justify adding
 
 1. **On-chain trust-list gating**: a downstream contract opens behavior only
-   if the subject has an active attestation from a trusted attester. Reads
-   `attester_of<T>()` and the attestation's `active` field.
+   if the subject has a live attestation (one in its active box) from a trusted
+   attester. Reads `attester_of<T>()`.
 2. **Compositional attestation**: schema C issues `Attestation<C>` if and
    only if `Attestation<A>` and `Attestation<B>` are both effective for the
    same subject. Reads two attestations during one Move call.

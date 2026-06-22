@@ -1,8 +1,8 @@
 # Demo scenario
 
-The attestation data created by `ts/demo/demo.ts` (run via
+The attestation data created by `scripts/demo.sh` (run via
 `scripts/run-demo.sh`), for use with the MVR integration. Keep this in sync
-with `demo.ts`.
+with `demo.sh`.
 
 ## Packages
 
@@ -25,35 +25,26 @@ schema-evolution case.
 ## Attestations
 
 Every attestation is issued by `audit_example` except where noted. Revocation
-moves an attestation out of its subject's active box into the revoked sink.
+moves an attestation out of its subject's active box into the revoked box.
 
-| Subject | Attestation | Status | Why |
-|---|---|---|---|
-| `@demo/dependency` | Audit (score 90) | **Revoked** | revoked at the end of the demo |
-| `@demo/subject` | AuditV2 (score 95) | **Active** | the live signal |
-| `@demo/subject` | Audit (score 88, v1) | **Revoked** | revoked at the end of the demo |
-| `@demo/subject` | Audit (Auditor B, score 50) | **Filtered out** | untrusted attester *identity* (`auditor_b`) — same type, different package |
-| `@demo/subject` | InternalNote | **Filtered out** | no registered Display |
+| Subject | Attestation | Status |
+|---|---|---|
+| `@demo/dependency` | Audit (score 90) | **Revoked** |
+| `@demo/subject` | AuditV2 (score 95) | **Active** |
+| `@demo/subject` | Audit (score 88, v1) | **Revoked** |
+| `@demo/subject` | Audit (Auditor B, score 50) | **Active** |
+| `@demo/subject` | InternalNote | **Active** |
 
-## Expected Security tabs
+## What a consumer sees
 
-Attester display name comes from the MVR trust config: `audit_example` →
-"Example Auditor".
+A consumer that trusts `audit_example` but not `auditor_b` sees only the
+**`AuditV2` (score 95)** attestation on `@demo/subject`: the v1 `Audit` is
+revoked (in the revoked box), the Auditor B `Audit` is filtered out by attester
+*identity* (same type, different package), and the `InternalNote` has no
+registered Display. `@demo/dependency`'s only audit is revoked, so it shows no
+live attestations at all.
 
-**`@demo/subject`** — active box: `AuditV2`; revoked sink: the v1 `Audit`.
-
-- Tab badge: **✓ 1** (the live `AuditV2`).
-- **Audits**: *Audit attestation (v2)* — by Example Auditor.
-- **Revoked:** Example Auditor (Audit attestation) — the v1 audit, listed
-  separately so it doesn't read as an endorsement.
-- Not shown: the Auditor B audit and the InternalNote attestation.
-
-**`@demo/dependency`** — active box: empty; revoked sink: its `Audit`.
-
-- Tab badge: none (no live attestations).
-- **Warning header:** "This package has no active attestations published on
-  MVR — it may not have been audited."
-- **Revoked:** Example Auditor (Audit attestation).
-
-The auditor's own page has an **Issued** tab listing every attestation
-`audit_example` has signed, with revoked ones in a separate "Revoked" section.
+Revoked attestations are still readable (from each subject's revoked box) — a
+consumer typically lists them separately so they don't read as endorsements. The
+auditor's own attestations are discoverable by querying its `Attestation<T>`
+types across all subjects.

@@ -11,15 +11,22 @@ came from us.
 
 - **`Audit`** — a completed review, with a score out of 100 and a link to the
   full report.
-- **`AuditV2`** — our richer schema (added in a package upgrade): adds a report
-  link and a `requires` list, so an audit can be made conditional on audits of
-  the package's dependencies. If a required dependency audit is revoked, ours is
-  automatically considered ineffective.
+- **`AuditV2`** — a richer schema added in a package upgrade: keeps the score
+  and adds a link to the full report.
 
 ## Reading our attestations
 
-Audits issued by Example Auditor show up under **Security → Audits** on a
-package's MVR page. A revoked or superseded audit is shown but de-emphasized.
+Each audit is an `Attestation<Audit>` (or `Attestation<AuditV2>`) owned by the
+audited subject's active `Box`. Any consumer can enumerate them directly:
+
+```
+getOwnedObjects(box_addr, filter={StructType:
+  <registry-pkg>::attestation_registry::Attestation<<this-pkg>::audit::Audit>})
+```
+
+where `box_addr` is derived from `(registry_id, subject_id)`. A revoked audit
+moves to the subject's revoked box, so it's read separately from the live set.
+See the attestation-registry repo's `DESIGN.md` for the box-address derivation.
 
 ## Contact
 

@@ -3,24 +3,24 @@
 `attestation_registry` keeps its core type minimal — `Attestation<T>` has a
 `subject` and `data: T`. Cross-cutting behaviors that schemas might want
 (expiration, etc.) are expressed as **Display field conventions** rather than
-additional Move types. Off-chain consumers (wallets, indexers, the `ts/`
+additional Move types. Off-chain consumers (wallets, explorers, the `ts/`
 library) recognize these conventional field names and apply the corresponding
 semantics when evaluating trust.
 
 The benefit of conventions-over-functors is composability: a schema can adopt
 zero, one, or many of these by including the corresponding fields in its
 `register_display` call. Combining them doesn't require nested type wrappers
-(`WithExpiry<WithRequires<Audit<OtterSec>>>`) — the schema just lists the
+(`WithExpiry<Audit<OtterSec>>`) — the schema just lists the
 fields it surfaces, and conventions stack naturally.
 
 ## Base effectiveness
 
 Revocation is **not** a convention — it's structural. An attestation lives in
-its subject's *active* box; `revoke` moves it out to a separate revoked-sink
-address. So a consumer that enumerates a subject's active box only ever sees
-un-revoked attestations — revocation needs no field to read, and there is no
-`active` flag to consult. The conventions below add *further* effectiveness
-conditions (e.g. expiry) on top of attestations already known to be active.
+its subject's *active* box; `revoke` moves it to the subject's *revoked* box. So
+a consumer that enumerates a subject's active box only ever sees un-revoked
+attestations — revocation needs no field to read, and there is no `active` flag
+to consult. The conventions below add *further* effectiveness conditions (e.g.
+expiry) on top of attestations already known to be active.
 
 ## Conventions
 
@@ -89,3 +89,14 @@ If a convention requires on-chain enforcement (e.g., a verifier contract that
 needs `is_effective` to apply expiration without an off-chain hop), it should
 graduate from this document into a typed Move helper. None of the conventions
 above are at that point yet.
+
+## Planned future conventions
+
+The "negative" attestation schemas (vulnerability disclosures) — a fast-follow,
+not yet shipped — will add two more conventional fields:
+
+- **`polarity`** — distinguishes a *negative* attestation (a warning, e.g. a
+  disclosed vulnerability) from a *positive* one (an endorsement, e.g. an
+  audit), so consumers render and weigh the two differently.
+- **`severity`** — for vulnerability disclosures, a CVSS-style severity band,
+  so consumers can rank or threshold disclosures.
