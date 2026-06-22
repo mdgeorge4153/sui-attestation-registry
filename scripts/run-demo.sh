@@ -86,7 +86,7 @@ fi
 
 echo
 echo "▶ demo"
-REGISTRY_ID="$REGISTRY_ID" SUI="$SUI" bash "$REPO_ROOT/scripts/demo.sh"
+REGISTRY_ID="$REGISTRY_ID" bash "$REPO_ROOT/scripts/demo.sh"
 
 echo
 echo "▶ done"

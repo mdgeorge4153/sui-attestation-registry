@@ -20,13 +20,13 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OPS="$REPO_ROOT/scripts/ops"
-SUI="${SUI:-sui}"
 RPC="${RPC:-http://127.0.0.1:9000}"
 PUBFILE="${PUBFILE:-$REPO_ROOT/Pub.localnet.toml}"
 REGISTRY="${REGISTRY_ID:?REGISTRY_ID is required (printed by test-publish.sh)}"
 
-# Read a field from the pubfile [[published]] block matching a package name.
-# (Same logic as scripts/test-publish.sh's parse_pkg_field.)
+# Read a field (e.g. published-at) from the pubfile's [[published]] block for
+# `<pkg>`. The pubfile is TOML-ish text we just scan per block — python is the
+# simplest tool for that. (Same helper as scripts/test-publish.sh.)
 parse_pkg_field() {
     python3 - "$PUBFILE" "$1" "$2" <<'PY'
 import re, sys
@@ -46,14 +46,18 @@ DEP=$(parse_pkg_field dependency_example published-at)
 SUBJ=$(parse_pkg_field subject_example published-at)
 AUDITOR_B=$(parse_pkg_field auditor_b published-at)
 
-# The AuditAdminCap (its type is defined in the original audit id) was
-# transferred to the publisher at publish; find it among the active address's
-# owned objects.
-ADDR=$("$SUI" client active-address)
-CAP=$(curl -s "$RPC" -H 'Content-Type: application/json' -d "{
-  \"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"suix_getOwnedObjects\",
-  \"params\":[\"$ADDR\",{\"filter\":{\"StructType\":\"$AUDIT_ORIG::audit::AuditAdminCap\"}}]}" \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['data'][0]['data']['objectId'])")
+# The object id of the single `structtype` object owned by `addr`.
+find_owned() {
+    curl -s "$RPC" -H 'Content-Type: application/json' -d "{
+      \"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"suix_getOwnedObjects\",
+      \"params\":[\"$1\",{\"filter\":{\"StructType\":\"$2\"}}]}" \
+      | jq -r '.result.data[0].data.objectId // empty'
+}
+
+# The AuditAdminCap was transferred to the publisher at publish; find it among
+# the active address's owned objects.
+ADDR=$(sui client active-address)
+CAP=$(find_owned "$ADDR" "$AUDIT_ORIG::audit::AuditAdminCap")
 
 echo "registry:    $REGISTRY"
 echo "audit pkg:   $AUDIT (orig $AUDIT_ORIG)"
@@ -70,15 +74,10 @@ DEP_AUDIT=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$DEP_BOX" 90 "https://a
 echo "  $DEP_AUDIT"
 
 echo "▶ attest_audit_v2 on subject (score 95, the live signal)"
-v2_out=$("$SUI" client ptb \
+SUBJ_AUDIT_V2=$(sui client ptb \
     --move-call "$AUDIT::audit_v2::attest_audit_v2" "@$CAP" "@$SUBJ_BOX" 95 '"https://audits.example.com/subject-v1.pdf"' \
-    --gas-budget 100000000 --json)
-SUBJ_AUDIT_V2=$(printf '%s' "$v2_out" | python3 -c '
-import json,sys
-for c in json.load(sys.stdin).get("objectChanges",[]):
-    if c.get("type")=="created" and "::audit_v2::AuditV2>" in c.get("objectType",""):
-        print(c["objectId"]); break
-')
+    --gas-budget 100000000 --json \
+  | jq -r '.objectChanges[] | select(.objectType | contains("::AuditV2>")) | .objectId')
 echo "  $SUBJ_AUDIT_V2"
 
 echo "▶ attest_audit on subject (score 88, will be revoked)"
@@ -89,12 +88,9 @@ echo "▶ Auditor B audit (untrusted identity) + attest_internal_note (both filt
 # Auditor B is a second, identical auditor that simply isn't in the trust
 # config — its Audit is filtered out by *identity*, not by type. Its
 # AuditAdminCap is its own distinct type (auditor_b's id).
-AUDITOR_B_CAP=$(curl -s "$RPC" -H 'Content-Type: application/json' -d "{
-  \"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"suix_getOwnedObjects\",
-  \"params\":[\"$ADDR\",{\"filter\":{\"StructType\":\"$AUDITOR_B::audit::AuditAdminCap\"}}]}" \
-  | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['data'][0]['data']['objectId'])")
+AUDITOR_B_CAP=$(find_owned "$ADDR" "$AUDITOR_B::audit::AuditAdminCap")
 bash "$OPS/attest-audit.sh" "$AUDITOR_B" "$AUDITOR_B_CAP" "$SUBJ_BOX" 50 "https://auditor-b.example/r.pdf" >/dev/null
-"$SUI" client ptb \
+sui client ptb \
     --move-call "$AUDIT::audit_v2::attest_internal_note" "@$SUBJ_BOX" '"no Display registered"' \
     --gas-budget 100000000 >/dev/null
 
@@ -102,26 +98,28 @@ echo "▶ revoke the dependency audit and the subject's v1 audit"
 bash "$OPS/revoke-audit.sh" "$AUDIT" "$CAP" "$DEP_BOX" "$DEP_AUDIT"
 bash "$OPS/revoke-audit.sh" "$AUDIT" "$CAP" "$SUBJ_BOX" "$SUBJ_AUDIT_V1"
 
-# Hand-off for the MVR Postgres seeder.
+# Hand-off for the MVR Postgres seeder. All values are object ids, so a plain
+# interpolated heredoc is clearer than building the JSON with a tool.
 DEMO_IDS="$REPO_ROOT/demo-ids.json"
-REGISTRY="$REGISTRY" REGPKG="$REGPKG" SUBJ="$SUBJ" DEP="$DEP" \
-AUDIT_ORIG="$AUDIT_ORIG" AUDIT="$AUDIT" DEP_AUDIT="$DEP_AUDIT" SUBJ_AUDIT_V2="$SUBJ_AUDIT_V2" \
-python3 - "$DEMO_IDS" <<'PY'
-import json, os, sys
-json.dump({
-    "registryId": os.environ["REGISTRY"],
-    "attestationRegistryPkg": os.environ["REGPKG"],
-    "subjects": {"subject": os.environ["SUBJ"], "dependency": os.environ["DEP"]},
-    "trustedAttestors": [
-        {"name": "audit_example",
-         "originalId": os.environ["AUDIT_ORIG"],
-         "latestId": os.environ["AUDIT"]},
-    ],
-    "createdAttestations": {
-        "dependencyAudit": os.environ["DEP_AUDIT"],
-        "subjectAuditV2": os.environ["SUBJ_AUDIT_V2"],
-    },
-}, open(sys.argv[1], "w"), indent=2)
-open(sys.argv[1], "a").write("\n")
-PY
+cat > "$DEMO_IDS" <<EOF
+{
+  "registryId": "$REGISTRY",
+  "attestationRegistryPkg": "$REGPKG",
+  "subjects": {
+    "subject": "$SUBJ",
+    "dependency": "$DEP"
+  },
+  "trustedAttestors": [
+    {
+      "name": "audit_example",
+      "originalId": "$AUDIT_ORIG",
+      "latestId": "$AUDIT"
+    }
+  ],
+  "createdAttestations": {
+    "dependencyAudit": "$DEP_AUDIT",
+    "subjectAuditV2": "$SUBJ_AUDIT_V2"
+  }
+}
+EOF
 echo "▶ wrote $DEMO_IDS"
