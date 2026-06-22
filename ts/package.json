@@ -3,9 +3,8 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "TypeScript library + CLI demo for the attestation_registry Move package.",
+  "description": "TypeScript SDK for the attestation_registry Move package.",
   "scripts": {
-    "demo": "tsx demo/demo.ts",
     "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

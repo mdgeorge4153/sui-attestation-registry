@@ -174,8 +174,8 @@ if [[ -n "$REGISTRY_ID" ]]; then
     echo
     echo "Registry shared object: $REGISTRY_ID"
     echo
-    echo "Run the TS demo with:"
-    echo "  REGISTRY_ID=$REGISTRY_ID pnpm --dir ts demo"
+    echo "Run the demo with:"
+    echo "  REGISTRY_ID=$REGISTRY_ID bash scripts/demo.sh"
 else
     echo
     echo "(couldn't extract Registry id from attestation_registry's publish output;"

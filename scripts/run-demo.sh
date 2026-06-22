@@ -86,7 +86,7 @@ fi
 
 echo
 echo "▶ demo"
-REGISTRY_ID="$REGISTRY_ID" pnpm --dir "$REPO_ROOT/ts" demo
+REGISTRY_ID="$REGISTRY_ID" SUI="$SUI" bash "$REPO_ROOT/scripts/demo.sh"
 
 echo
 echo "▶ done"
