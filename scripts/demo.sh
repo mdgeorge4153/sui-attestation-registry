@@ -9,8 +9,8 @@
 #   - audit the dependency (Audit, score 90; revoked at the end)
 #   - audit the subject with AuditV2 (score 95; the live signal)
 #   - audit the subject with v1 Audit (score 88; revoked at the end)
-#   - attest_untrusted + attest_internal_note on the subject (both filtered out
-#     by a trust consumer)
+#   - an Audit from Auditor B (a second, untrusted auditor identity) + an
+#     attest_internal_note on the subject (both filtered out by a trust consumer)
 #   - revoke the dependency audit and the subject's v1 audit
 #   - write demo-ids.json for the MVR seeder
 #
@@ -44,7 +44,7 @@ AUDIT=$(parse_pkg_field audit_example published-at)      # v2/latest id (has aud
 AUDIT_ORIG=$(parse_pkg_field audit_example original-id)  # v1 id — defines Audit + AuditAdminCap
 DEP=$(parse_pkg_field dependency_example published-at)
 SUBJ=$(parse_pkg_field subject_example published-at)
-UNTRUSTED=$(parse_pkg_field untrusted_example published-at)
+AUDITOR_B=$(parse_pkg_field auditor_b published-at)
 
 # The AuditAdminCap (its type is defined in the original audit id) was
 # transferred to the publisher at publish; find it among the active address's
@@ -85,9 +85,16 @@ echo "▶ attest_audit on subject (score 88, will be revoked)"
 SUBJ_AUDIT_V1=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$SUBJ_BOX" 88 "https://audits.example.com/subject-v1.pdf")
 echo "  $SUBJ_AUDIT_V1"
 
-echo "▶ attest_untrusted + attest_internal_note on subject (both filtered out)"
+echo "▶ Auditor B audit (untrusted identity) + attest_internal_note (both filtered out)"
+# Auditor B is a second, identical auditor that simply isn't in the trust
+# config — its Audit is filtered out by *identity*, not by type. Its
+# AuditAdminCap is its own distinct type (auditor_b's id).
+AUDITOR_B_CAP=$(curl -s "$RPC" -H 'Content-Type: application/json' -d "{
+  \"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"suix_getOwnedObjects\",
+  \"params\":[\"$ADDR\",{\"filter\":{\"StructType\":\"$AUDITOR_B::audit::AuditAdminCap\"}}]}" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['data'][0]['data']['objectId'])")
+bash "$OPS/attest-audit.sh" "$AUDITOR_B" "$AUDITOR_B_CAP" "$SUBJ_BOX" 50 "https://auditor-b.example/r.pdf" >/dev/null
 "$SUI" client ptb \
-    --move-call "$UNTRUSTED::untrusted::attest_untrusted" "@$SUBJ_BOX" '"not whitelisted"' \
     --move-call "$AUDIT::audit_v2::attest_internal_note" "@$SUBJ_BOX" '"no Display registered"' \
     --gas-budget 100000000 >/dev/null
 

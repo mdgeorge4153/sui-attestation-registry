@@ -1,5 +1,5 @@
 [package]
-name = "untrusted_example"
+name = "auditor_b"
 edition = "2024"
 
 [dependencies]

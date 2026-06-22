@@ -7,9 +7,9 @@
 # Packages (publish order matters — deps before dependents):
 #   packages/attestation_registry  -> shared Registry singleton (created in init)
 #   examples/audit_example         -> Audit schema (later upgraded to add AuditV2)
+#   examples/auditor_b             -> a second auditor (Auditor B), NOT in the trusted set
 #   demo/dependency_example        -> a subject, and a dependency of subject_example
 #   demo/subject_example           -> the browsable subject (depends on dependency_example)
-#   demo/untrusted_example         -> attester not in the trusted set (filtered out)
 #
 # The AuditV2 schema lives in examples/audit_example/upgrade/audit_v2.move,
 # outside sources/ so it is absent from the initial publish. We copy it into
@@ -91,7 +91,7 @@ for block in content.split('[[published]]'):
 PY
 }
 
-for pkg in packages/attestation_registry examples/audit_example demo/dependency_example demo/subject_example demo/untrusted_example; do
+for pkg in packages/attestation_registry examples/audit_example examples/auditor_b demo/dependency_example demo/subject_example; do
     name=$(basename "$pkg")
     echo
     echo "▶ test-publish $name"
@@ -142,7 +142,7 @@ echo "  ok"
 # After the upgrade, audit_example's published-at is the v2 id (which defines
 # both the `audit` and `audit_v2` modules); original-id is unchanged.
 PKG_AUDIT=$(parse_pkg_field audit_example published-at)
-PKG_UNTRUSTED=$(parse_pkg_field untrusted_example published-at)
+PKG_AUDITOR_B=$(parse_pkg_field auditor_b published-at)
 
 if [[ -z "$PKG_AUDIT" ]]; then
     echo "could not resolve package addresses from $PUBFILE — skipping display registration"
@@ -165,7 +165,7 @@ else
 
     register_display register_audit_display     "$PKG_AUDIT"     audit      register_audit_display
     register_display register_audit_v2_display  "$PKG_AUDIT"     audit_v2   register_audit_v2_display
-    register_display register_untrusted_display "$PKG_UNTRUSTED" untrusted  register_untrusted_display
+    register_display register_auditor_b_display  "$PKG_AUDITOR_B" audit      register_audit_display
 fi
 
 echo
