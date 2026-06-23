@@ -3,8 +3,8 @@
 `attestation_registry` keeps its core type minimal — `Attestation<T>` has a
 `subject` and `data: T`. Cross-cutting behaviors that schemas might want
 (expiration, etc.) are expressed as **Display field conventions** rather than
-additional Move types. Off-chain consumers (wallets, explorers, the `ts/`
-library) recognize these conventional field names and apply the corresponding
+additional Move types. Off-chain consumers (wallets, explorers, apps)
+recognize these conventional field names and apply the corresponding
 semantics when evaluating trust.
 
 The benefit of conventions-over-functors is composability: a schema can adopt

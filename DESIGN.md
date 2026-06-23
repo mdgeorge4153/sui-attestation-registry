@@ -10,7 +10,8 @@ conventions `CONVENTIONS.md`.
 The whole design follows from four choices:
 
 - **Off-chain primary.** The dominant access pattern is off-chain consumers
-  (wallets, explorers, the TS library) reading attestations about a subject.
+  (wallets, explorers, apps like the mvr frontend) reading attestations about
+  a subject.
   Every on-chain choice was weighed against "does this make the off-chain read
   better, the same, or worse?"
 - **Attester = `T`'s defining package.** The attester recorded for an
@@ -165,8 +166,8 @@ public struct Revoked<phantom T> has copy, drop { subject: ID }
 ## Display-mixin conventions
 
 Cross-cutting behaviors like expiration (`expires_at`) are Display field
-conventions, evaluated off-chain by `ts/src/conventions.ts` and any consumer
-that adopts them (see `CONVENTIONS.md`). They don't need on-chain enforcement
+conventions, evaluated off-chain by any consumer that adopts them (e.g. the mvr
+frontend; see `CONVENTIONS.md`). They don't need on-chain enforcement
 (off-chain primary), and modeling them as Move wrappers created composability
 problems — `WithExpiry<Audit<OtterSec>>` is awkward to nest, and wrappers
 confused the attester-resolution rule. Display fields stack naturally: a schema

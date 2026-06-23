@@ -1,8 +1,8 @@
 # Sui Attestation Registry PoC
 
 A Move primitive for typed, on-chain attestations about arbitrary subjects
-(packages, addresses, anything that has an `ID`), plus a TypeScript library
-and CLI demo that exercises it.
+(packages, addresses, anything that has an `ID`), plus a shell CLI demo that
+exercises it.
 
 The design is **off-chain-primary**: attestations are stored under a
 deterministic, type-filterable on-chain layout that's cheap to enumerate from
@@ -22,9 +22,6 @@ demo/                         — fixtures that exist only to drive the local de
   dependency_example/         — a subject; dependency of subject_example
   subject_example/            — the browsed subject (depends on dependency_example)
 scripts/                      — shell demo: run-demo.sh + composable ptb ops (ops/)
-ts/
-  src/                        — client SDK: Box derivation, queries, conventions evaluator
-  examples/audit.ts           — auditor-side PTB builders for the auditor schema
 CONVENTIONS.md                — Display-field conventions (expires_at, …)
 FUTURE-EXTENSIONS.md          — design memos for surfaces deliberately deferred from v0
 ```
@@ -145,13 +142,13 @@ Options:
 - `--subject <hex-id>` — re-use a specific subject ID. Default: a fresh
   random ID per run, so `create_box` doesn't collide on re-runs.
 
-## Conventions evaluator
+## Effectiveness
 
-`ts/src/conventions.ts` implements `isEffective(attestation)`: an
-attestation is effective iff its `expires_at` Display convention (if present)
-is still in the future. Revocation is handled upstream by box membership — a
-revoked attestation is read from the revoked box, not the active box — so it
-isn't part of this check. See `CONVENTIONS.md`.
+Off-chain consumers decide whether an attestation is *effective*: it must be
+unexpired per the `expires_at` Display convention (if present). Revocation is
+handled upstream by box membership — a revoked attestation lives in the revoked
+box, not the active one — so it isn't part of that check. See `CONVENTIONS.md`
+for the conventions and their evaluation rules.
 
 ## Further reading
 

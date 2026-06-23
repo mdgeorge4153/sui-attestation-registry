@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end demo, composed from the CLI ops in scripts/ops/ (create-box,
 # attest-audit, revoke-audit) plus a few inline `sui client ptb` calls. Replaces
-# the old TS demo (ts/demo/demo.ts) — every on-chain action here is a plain CLI
+# the old TS demo — every on-chain action here is a plain CLI
 # move-call a user could run by hand.
 #
 # Scenario (mirrors DEMO-SCENARIO.md):
