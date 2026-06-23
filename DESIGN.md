@@ -179,10 +179,11 @@ The base is minimal; schemas express their semantics in their own package, not
 via registry flags:
 
 - **Revocation policy**: a schema gates its `revoke_*` wrapper before minting
-  `Permit<T>`. `auditor` uses one `AuditAdminCap` (one authority over both
-  `Audit` and `AuditV2`); the other extreme — a per-attestation bearer cap
-  (`VulnRevokeCap` with a `receiving_object_id` guard) — is the planned
-  `vuln_example` fast-follow. No `revoke_*` wrapper = permanent.
+  `Permit<T>`. `auditor` uses one `AuditAdminCap` — a single authority over all
+  of an auditor's attestation types, including any added in later upgrades; the
+  other extreme — a per-attestation bearer cap (`VulnRevokeCap` with a
+  `receiving_object_id` guard) — is the planned `vuln_example` fast-follow. No
+  `revoke_*` wrapper = permanent.
 - **Permissioned vs permissionless**: a private data constructor is
   permissioned (only the schema package attests); a public constructor plus a
   `sender: address` field is permissionless with the signer captured in the

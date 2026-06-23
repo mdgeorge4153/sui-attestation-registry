@@ -15,10 +15,10 @@ public struct Audit has store, drop {
 }
 
 /// Single-party authority to *control* this auditor's attestations: whoever
-/// holds this cap can both issue and revoke any `Attestation<Audit>` (and
-/// `AuditV2`). Created once at publish and transferred to the publisher. This
-/// is one authority-policy choice among many — the base registry prescribes
-/// none; each schema picks its own and supplies the `Permit` `revoke` requires.
+/// holds this cap can both issue and revoke any `Attestation<Audit>`. Created
+/// once at publish and transferred to the publisher. This is one
+/// authority-policy choice among many — the base registry prescribes none;
+/// each schema picks its own and supplies the `Permit` `revoke` requires.
 public struct AuditAdminCap has key, store {
     id: UID,
 }

@@ -15,9 +15,9 @@ Display-field **conventions** rather than additional Move types.
 packages/
   attestation_registry/       — the only deployable: Registry, Box, Attestation
 examples/                     — reusable schema patterns for third-party attesters
-  auditor/                    — reference auditor schema: Audit { score: u8 } (+ AuditV2 upgrade)
+  auditor/                    — reference auditor schema: Audit { score: u8 }
 demo/                         — fixtures that exist only to drive the local demo (see demo/README.md)
-  auditor_a/                  — a published copy of examples/auditor; TRUSTED in the demo
+  auditor_a/                  — copy of examples/auditor + an AuditV2 upgrade; TRUSTED in the demo
   auditor_b/                  — a second copy; NOT trusted (the identity-based-trust demo)
   dependency_example/         — a subject; dependency of subject_example
   subject_example/            — the browsed subject (depends on dependency_example)
@@ -70,7 +70,7 @@ attribute and the `type_name::original_id` native helper — the testnet
 release line at the time of writing (`v1.73.0`) is sufficient. Install or
 update via `suiup install sui@testnet`.
 
-## Running the TS demo
+## Running the demo
 
 The demo creates Boxes for two real subjects (`dependency_example` and the
 `subject_example` that depends on it), issues audits (an `Audit` on the

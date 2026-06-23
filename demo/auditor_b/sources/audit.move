@@ -5,9 +5,9 @@ use sui::display_registry::DisplayRegistry;
 use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
 
-/// Audit attestation payload. Defined here so auditor_b is the
+/// Audit attestation payload. Defined here so auditor is the
 /// `Permit<Audit>` minting authority and the recorded attester for every
-/// `Attestation<Audit>` is auditor_b's published address.
+/// `Attestation<Audit>` is auditor's published address.
 public struct Audit has store, drop {
     score: u8,
     /// URL of the full audit report (surfaced via the `link` convention).
@@ -15,10 +15,10 @@ public struct Audit has store, drop {
 }
 
 /// Single-party authority to *control* this auditor's attestations: whoever
-/// holds this cap can both issue and revoke any `Attestation<Audit>` (and
-/// `AuditV2`). Created once at publish and transferred to the publisher. This
-/// is one authority-policy choice among many — the base registry prescribes
-/// none; each schema picks its own and supplies the `Permit` `revoke` requires.
+/// holds this cap can both issue and revoke any `Attestation<Audit>`. Created
+/// once at publish and transferred to the publisher. This is one
+/// authority-policy choice among many — the base registry prescribes none;
+/// each schema picks its own and supplies the `Permit` `revoke` requires.
 public struct AuditAdminCap has key, store {
     id: UID,
 }

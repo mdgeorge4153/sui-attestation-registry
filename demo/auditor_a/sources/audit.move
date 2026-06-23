@@ -5,25 +5,25 @@ use sui::display_registry::DisplayRegistry;
 use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
 
-/// Audit attestation payload. Defined here so auditor_a is the
+/// Audit attestation payload. Defined here so auditor is the
 /// `Permit<Audit>` minting authority and the recorded attester for every
-/// `Attestation<Audit>` is auditor_a's published address.
+/// `Attestation<Audit>` is auditor's published address.
 public struct Audit has store, drop {
     score: u8,
     /// URL of the full audit report (surfaced via the `link` convention).
     report_url: String,
 }
 
-/// Single-party authority to *control* this auditor_a's attestations: whoever
-/// holds this cap can both issue and revoke any `Attestation<Audit>` (and
-/// `AuditV2`). Created once at publish and transferred to the publisher. This
-/// is one authority-policy choice among many — the base registry prescribes
-/// none; each schema picks its own and supplies the `Permit` `revoke` requires.
+/// Single-party authority to *control* this auditor's attestations: whoever
+/// holds this cap can both issue and revoke any `Attestation<Audit>`. Created
+/// once at publish and transferred to the publisher. This is one
+/// authority-policy choice among many — the base registry prescribes none;
+/// each schema picks its own and supplies the `Permit` `revoke` requires.
 public struct AuditAdminCap has key, store {
     id: UID,
 }
 
-/// Mint the auditor_a's `AuditAdminCap` at publish and hand it to the publisher.
+/// Mint the auditor's `AuditAdminCap` at publish and hand it to the publisher.
 fun init(ctx: &mut TxContext) {
     transfer::transfer(AuditAdminCap { id: object::new(ctx) }, ctx.sender());
 }
@@ -55,7 +55,7 @@ public fun register_audit_display(
 }
 
 /// Issue an Audit attestation into `box` (the subject's active box). Gated by
-/// the `AuditAdminCap`, the single authority over this auditor_a's attestations.
+/// the `AuditAdminCap`, the single authority over this auditor's attestations.
 public fun attest_audit(
     _: &AuditAdminCap,
     box: &Box,
