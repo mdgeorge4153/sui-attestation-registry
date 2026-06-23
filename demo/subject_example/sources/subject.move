@@ -1,7 +1,6 @@
-/// The package a user browses in the demo. It depends on
-/// `dependency_example` so the dependency relationship is real — it shows up
-/// in MVR's Dependencies tab, and lets an `Audit` on this package `require`
-/// an `Audit` on its dependency (the conditional-trust scenario).
+/// The package a viewer browses in the demo. Depends on `dependency_example`
+/// (a real dependency edge) so the demo can attest about both a package and one
+/// of its dependencies.
 module subject_example::subject;
 
 use dependency_example::dependency;
