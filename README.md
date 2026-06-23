@@ -15,16 +15,16 @@ Display-field **conventions** rather than additional Move types.
 packages/
   attestation_registry/       — the only deployable: Registry, Box, Attestation
 examples/                     — reusable schema patterns for third-party attesters
-  audit_example/              — sample schema: Audit { score: u8 } (+ AuditV2 upgrade)
-  auditor_b/                  — a second auditor (same source as audit_example),
-                                deliberately NOT in the trusted set
-demo/                         — fixtures that exist only to drive the local demo
+  auditor/                    — reference auditor schema: Audit { score: u8 } (+ AuditV2 upgrade)
+demo/                         — fixtures that exist only to drive the local demo (see demo/README.md)
+  auditor_a/                  — a published copy of examples/auditor; TRUSTED in the demo
+  auditor_b/                  — a second copy; NOT trusted (the identity-based-trust demo)
   dependency_example/         — a subject; dependency of subject_example
   subject_example/            — the browsed subject (depends on dependency_example)
 scripts/                      — shell demo: run-demo.sh + composable ptb ops (ops/)
 ts/
   src/                        — client SDK: Box derivation, queries, conventions evaluator
-  examples/audit.ts           — auditor-side PTB builders for the audit_example schema
+  examples/audit.ts           — auditor-side PTB builders for the auditor schema
 CONVENTIONS.md                — Display-field conventions (expires_at, …)
 FUTURE-EXTENSIONS.md          — design memos for surfaces deliberately deferred from v0
 ```
@@ -65,7 +65,7 @@ directory:
 
 ```bash
 cd packages/attestation_registry && sui move test
-cd examples/audit_example        && sui move test
+cd examples/auditor              && sui move test
 ```
 
 You'll need a `sui` CLI new enough to support the `#[error(code = …)]`

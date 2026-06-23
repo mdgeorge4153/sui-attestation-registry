@@ -178,7 +178,7 @@ The base is minimal; schemas express their semantics in their own package, not
 via registry flags:
 
 - **Revocation policy**: a schema gates its `revoke_*` wrapper before minting
-  `Permit<T>`. `audit_example` uses one `AuditAdminCap` (one authority over both
+  `Permit<T>`. `auditor` uses one `AuditAdminCap` (one authority over both
   `Audit` and `AuditV2`); the other extreme — a per-attestation bearer cap
   (`VulnRevokeCap` with a `receiving_object_id` guard) — is the planned
   `vuln_example` fast-follow. No `revoke_*` wrapper = permanent.

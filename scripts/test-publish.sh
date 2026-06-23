@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Test-publish all Move packages against the active sui CLI network, sharing
 # one ephemeral pubfile (Pub.<network>.toml at the repo root), then upgrade
-# audit_example to add the AuditV2 schema, and register every Display so the
+# auditor_a to add the AuditV2 schema, and register every Display so the
 # demo can render attestations.
 #
 # Packages (publish order matters — deps before dependents):
 #   packages/attestation_registry  -> shared Registry singleton (created in init)
-#   examples/audit_example         -> Audit schema (later upgraded to add AuditV2)
-#   examples/auditor_b             -> a second auditor (Auditor B), NOT in the trusted set
+#   demo/auditor_a         -> Audit schema (later upgraded to add AuditV2)
+#   demo/auditor_b             -> a second auditor (Auditor B), NOT in the trusted set
 #   demo/dependency_example        -> a subject, and a dependency of subject_example
 #   demo/subject_example           -> the browsable subject (depends on dependency_example)
 #
-# The AuditV2 schema lives in examples/audit_example/upgrade/audit_v2.move,
+# The AuditV2 schema lives in demo/auditor_a/upgrade/audit_v2.move,
 # outside sources/ so it is absent from the initial publish. We copy it into
 # sources/ only for the upgrade step, so AuditV2's defining package id is the
 # *upgraded* id — exercising the schema-evolution path.
@@ -38,7 +38,7 @@ DISPLAY_REGISTRY=0xd
 GAS_BUDGET=100000000
 
 # The staged AuditV2 upgrade module and its transient location under sources/.
-AUDIT_DIR="$REPO_ROOT/examples/audit_example"
+AUDIT_DIR="$REPO_ROOT/demo/auditor_a"
 AUDIT_V2_SRC="$AUDIT_DIR/upgrade/audit_v2.move"
 AUDIT_V2_STAGED="$AUDIT_DIR/sources/audit_v2.move"
 
@@ -91,7 +91,7 @@ for block in content.split('[[published]]'):
 PY
 }
 
-for pkg in packages/attestation_registry examples/audit_example examples/auditor_b demo/dependency_example demo/subject_example; do
+for pkg in packages/attestation_registry demo/auditor_a demo/auditor_b demo/dependency_example demo/subject_example; do
     name=$(basename "$pkg")
     echo
     echo "▶ test-publish $name"
@@ -121,10 +121,10 @@ for c in r.get('objectChanges', []):
     rm -f "$json_out"
 done
 
-# --- Upgrade audit_example to add the AuditV2 schema. test-upgrade reads the
+# --- Upgrade auditor_a to add the AuditV2 schema. test-upgrade reads the
 # upgrade capability from the pubfile, so we don't pass it explicitly. ---
 echo
-echo "▶ upgrade audit_example (add AuditV2)"
+echo "▶ upgrade auditor_a (add AuditV2)"
 cp "$AUDIT_V2_SRC" "$AUDIT_V2_STAGED"
 upgrade_out=$(mktemp)
 if ! (cd "$AUDIT_DIR" \
@@ -139,9 +139,9 @@ fi
 rm -f "$upgrade_out" "$AUDIT_V2_STAGED"
 echo "  ok"
 
-# After the upgrade, audit_example's published-at is the v2 id (which defines
+# After the upgrade, auditor_a's published-at is the v2 id (which defines
 # both the `audit` and `audit_v2` modules); original-id is unchanged.
-PKG_AUDIT=$(parse_pkg_field audit_example published-at)
+PKG_AUDIT=$(parse_pkg_field auditor_a published-at)
 PKG_AUDITOR_B=$(parse_pkg_field auditor_b published-at)
 
 if [[ -z "$PKG_AUDIT" ]]; then
@@ -169,7 +169,7 @@ else
 fi
 
 echo
-echo "✓ all packages test-published and audit_example upgraded"
+echo "✓ all packages test-published and auditor_a upgraded"
 if [[ -n "$REGISTRY_ID" ]]; then
     echo
     echo "Registry shared object: $REGISTRY_ID"

@@ -5,9 +5,9 @@ use sui::display_registry::DisplayRegistry;
 use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
 
-/// Audit attestation payload. Defined here so audit_example is the
+/// Audit attestation payload. Defined here so auditor_b is the
 /// `Permit<Audit>` minting authority and the recorded attester for every
-/// `Attestation<Audit>` is audit_example's published address.
+/// `Attestation<Audit>` is auditor_b's published address.
 public struct Audit has store, drop {
     score: u8,
     /// URL of the full audit report (surfaced via the `link` convention).

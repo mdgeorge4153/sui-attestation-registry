@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Issue an Attestation<Audit> into a subject's active box and echo its id.
-# Reusable CLI op over audit_example::attest_audit (admin-cap-gated); the
+# Reusable CLI op over auditor::attest_audit (admin-cap-gated); the
 # auditor's AuditAdminCap gates both attest and revoke.
 #
 # Usage: attest-audit.sh <audit-pkg> <admin-cap> <active-box> <score-u8> <report-url>

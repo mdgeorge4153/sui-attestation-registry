@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Revoke an Attestation<Audit> — moves it from the active box to the revoked
-# box. Reusable CLI op over audit_example::revoke_audit; the attestation id is
+# box. Reusable CLI op over auditor::revoke_audit; the attestation id is
 # passed with `@` and resolves as the `Receiving<Attestation<Audit>>` arg.
 #
 # Usage: revoke-audit.sh <audit-pkg> <admin-cap> <active-box> <attestation-id>

@@ -1,20 +1,20 @@
-/// V2 audit schema, introduced in a package *upgrade* of audit_example.
+/// V2 audit schema, introduced in a package *upgrade* of auditor.
 ///
 /// This module lives outside `sources/` so it is absent from the initial
 /// publish. The publish script copies it into `sources/` only for the
 /// upgrade step (see `scripts/test-publish.sh`). As a result `AuditV2`'s
 /// defining (origin) package id is the *upgraded* package id — distinct from
-/// audit_example's original publish id — while `attester_of<AuditV2>()` still
+/// auditor's original publish id — while `attester_of<AuditV2>()` still
 /// resolves to the original id. That mismatch is exactly the schema-evolution
-/// case the trusted-attestor matching must handle: trusting audit_example's
+/// case the trusted-attestor matching must handle: trusting auditor's
 /// original id should surface `Attestation<AuditV2>` too.
-module audit_example::audit_v2;
+module auditor::audit_v2;
 
 use std::string::String;
 use sui::display_registry::DisplayRegistry;
 use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
-use audit_example::audit::AuditAdminCap;
+use auditor::audit::AuditAdminCap;
 
 /// V2 audit payload: adds a report link.
 public struct AuditV2 has store, drop {

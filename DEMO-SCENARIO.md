@@ -9,12 +9,12 @@ with `demo.sh`.
 | Package | Role | Schemas |
 |---|---|---|
 | `attestation_registry` | the registry (shared `Registry` singleton) | — |
-| `audit_example` | trusted attester | `Audit` (v1); `AuditV2`, `InternalNote` (added in a v2 **upgrade**) |
-| `auditor_b` | a second auditor (Auditor B), **not** in the trusted set | `Audit` (same source as `audit_example`) |
+| `auditor_a` | trusted attester | `Audit` (v1); `AuditV2`, `InternalNote` (added in a v2 **upgrade**) |
+| `auditor_b` | a second auditor (Auditor B), **not** in the trusted set | `Audit` (same source as `auditor_a`) |
 | `dependency_example` | subject; dependency of `subject_example` | — |
 | `subject_example` | the browsed subject; depends on `dependency_example` | — |
 
-Trusted attesters (whitelist): `audit_example` only. Its trust covers both its
+Trusted attesters (whitelist): `auditor_a` only. Its trust covers both its
 original id (the `Audit` type) and its upgraded id (`AuditV2`) — the
 schema-evolution case.
 
@@ -24,7 +24,7 @@ schema-evolution case.
 
 ## Attestations
 
-Every attestation is issued by `audit_example` except where noted. Revocation
+Every attestation is issued by `auditor_a` except where noted. Revocation
 moves an attestation out of its subject's active box into the revoked box.
 
 | Subject | Attestation | Status |
@@ -37,7 +37,7 @@ moves an attestation out of its subject's active box into the revoked box.
 
 ## What a consumer sees
 
-A consumer that trusts `audit_example` but not `auditor_b` sees only the
+A consumer that trusts `auditor_a` but not `auditor_b` sees only the
 **`AuditV2` (score 95)** attestation on `@demo/subject`: the v1 `Audit` is
 revoked (in the revoked box), the Auditor B `Audit` is filtered out by attester
 *identity* (same type, different package), and the `InternalNote` has no

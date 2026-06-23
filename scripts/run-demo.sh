@@ -2,8 +2,8 @@
 # Full single-command local demo:
 #   - kill any prior `sui start --with-faucet` localnet
 #   - start a fresh one
-#   - test-publish all packages, upgrade audit_example, register Displays
-#   - run the TS demo
+#   - test-publish all packages, upgrade auditor_a, register Displays
+#   - run the shell demo (scripts/demo.sh)
 #   - kill the localnet on exit (success or failure)
 #
 # Usage:

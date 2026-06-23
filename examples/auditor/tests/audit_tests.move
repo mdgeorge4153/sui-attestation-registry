@@ -1,11 +1,11 @@
 #[test_only]
-module audit_example::audit_tests;
+module auditor::audit_tests;
 
 use std::string::String;
 use sui::test_scenario;
 use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
-use audit_example::audit::{Self, Audit};
+use auditor::audit::{Self, Audit};
 
 const ALICE: address = @0xA11CE;
 
@@ -18,9 +18,9 @@ fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
     )
 }
 
-/// Verifies the cross-package attest flow: `audit_example::attest_audit`
+/// Verifies the cross-package attest flow: `auditor::attest_audit`
 /// produces an accessible attestation, and `attester_of<Audit>` returns
-/// audit_example's package address — distinct from `attestation_registry`'s.
+/// auditor's package address — distinct from `attestation_registry`'s.
 #[test]
 fun test_attest_audit_cross_package() {
     let subject = subject_for(@0xDEAD);
@@ -51,7 +51,7 @@ fun test_attest_audit_cross_package() {
     assert!(a.data().score() == 9, 1);
     attestation_registry::put_back_for_testing(&mut box, a);
 
-    // attester_of<Audit> must resolve to audit_example's package address, not
+    // attester_of<Audit> must resolve to auditor's package address, not
     // attestation_registry's.
     let audit_pkg = attestation_registry::attester_of<Audit>();
     let registry_pkg = attestation_registry::attester_of<Registry>();

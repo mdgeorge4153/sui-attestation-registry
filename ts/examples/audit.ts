@@ -1,7 +1,7 @@
 import { Transaction } from '@mysten/sui/transactions';
 
 /**
- * Append `audit_example::audit::attest_audit(admin, box, score, report_url)` to
+ * Append `auditor::audit::attest_audit(admin, box, score, report_url)` to
  * `tx`. Gated by the auditor's `AuditAdminCap`; `boxId` is the subject's active
  * box. Returns nothing.
  */
@@ -27,7 +27,7 @@ export function attestAuditTx(
 }
 
 /**
- * Append `audit_example::audit_v2::attest_audit_v2(admin, box, score,
+ * Append `auditor::audit_v2::attest_audit_v2(admin, box, score,
  * report_url)` to `tx`. Gated by the same `AuditAdminCap`.
  *
  * `auditExamplePkg` must be the *upgraded* (v2) package id, since that is
@@ -55,7 +55,7 @@ export function attestAuditV2Tx(
 }
 
 /**
- * Append `audit_example::audit::revoke_audit(admin, box, rcv)` to `tx` — the
+ * Append `auditor::audit::revoke_audit(admin, box, rcv)` to `tx` — the
  * admin-cap revocation policy: a holder of the `AuditAdminCap` revokes any
  * `Attestation<Audit>`. `auditExamplePkg` may be any version that defines the
  * `audit` module (the type and policy are stable across the upgrade).
@@ -80,7 +80,7 @@ export function revokeAuditTx(
 }
 
 /**
- * Fully-qualified Move type for `Attestation<Audit>`. Pass audit_example's
+ * Fully-qualified Move type for `Attestation<Audit>`. Pass auditor's
  * *original* id as `auditExamplePkg` — the v1 `Audit` type keeps the original
  * id across the upgrade.
  */
@@ -92,7 +92,7 @@ export function auditAttestationType(args: {
 }
 
 /**
- * Fully-qualified Move type for `Attestation<AuditV2>`. Pass audit_example's
+ * Fully-qualified Move type for `Attestation<AuditV2>`. Pass auditor's
  * *upgraded* (v2) id as `auditExamplePkg` — `AuditV2` is defined in the
  * upgrade, so its defining id is the v2 id.
  */

@@ -40,8 +40,8 @@ PY
 }
 
 REGPKG=$(parse_pkg_field attestation_registry published-at)
-AUDIT=$(parse_pkg_field audit_example published-at)      # v2/latest id (has audit + audit_v2)
-AUDIT_ORIG=$(parse_pkg_field audit_example original-id)  # v1 id — defines Audit + AuditAdminCap
+AUDIT=$(parse_pkg_field auditor_a published-at)      # v2/latest id (has audit + audit_v2)
+AUDIT_ORIG=$(parse_pkg_field auditor_a original-id)  # v1 id — defines Audit + AuditAdminCap
 DEP=$(parse_pkg_field dependency_example published-at)
 SUBJ=$(parse_pkg_field subject_example published-at)
 AUDITOR_B=$(parse_pkg_field auditor_b published-at)
@@ -111,7 +111,7 @@ cat > "$DEMO_IDS" <<EOF
   },
   "trustedAttestors": [
     {
-      "name": "audit_example",
+      "name": "auditor_a",
       "originalId": "$AUDIT_ORIG",
       "latestId": "$AUDIT"
     }
