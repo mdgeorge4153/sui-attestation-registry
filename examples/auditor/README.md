@@ -17,3 +17,15 @@ it to stand up your own auditor identity — the demo does exactly that
 How the recorded attester is anchored to this package's identity, and how
 consumers read and revoke attestations, is the registry's concern — see the
 registry repo's `DESIGN.md`.
+
+## Standing up your own auditor
+
+A real auditor copies this package as a starting point. High level (TODO: expand
+into a proper guide, possibly its own top-level doc):
+
+- Register an MVR name for your package.
+- Publish your own copy (you likely won't need the `AuditV2` upgrade — it's a
+  demo-only schema-evolution illustration).
+- Custody your `UpgradeCap` and the `AuditAdminCap` minted at publish.
+- Replace this README with your auditing policy, or a link to your docs.
+
