@@ -4,7 +4,7 @@
 # the old TS demo — every on-chain action here is a plain CLI
 # move-call a user could run by hand.
 #
-# Scenario (mirrors DEMO-SCENARIO.md):
+# Scenario (mirrors the scenario in demo/README.md):
 #   - create boxes for the dependency and the subject (which depends on it)
 #   - audit the dependency (Audit, score 90; revoked at the end)
 #   - audit the subject with AuditV2 (score 95; the live signal)

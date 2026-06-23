@@ -26,3 +26,28 @@ a consumer surfaces one and ignores the other purely by package address.
   `subject_example`.
 - **`subject_example/`** — the package a viewer browses; depends on
   `dependency_example`.
+
+## The scenario
+
+`scripts/run-demo.sh` (via `scripts/demo.sh`) publishes these packages, then has
+`auditor_a` issue and revoke attestations (plus one from the untrusted
+`auditor_b`). Keep this in sync with `demo.sh`.
+
+| Subject | Attestation | Status |
+|---|---|---|
+| `@demo/dependency` | Audit (score 90) | **Revoked** |
+| `@demo/subject` | AuditV2 (score 95) | **Active** |
+| `@demo/subject` | Audit (score 88, v1) | **Revoked** |
+| `@demo/subject` | Audit (Auditor B, score 50) | **Active** |
+| `@demo/subject` | InternalNote | **Active** |
+
+Every attestation is issued by `auditor_a` except the Auditor B one.
+"Active"/"Revoked" is the on-chain status — which box (active or revoked) owns it.
+
+**What a consumer sees.** A consumer that trusts `auditor_a` but not `auditor_b`
+sees only the **`AuditV2` (score 95)** attestation on `@demo/subject`: the v1
+`Audit` is revoked, the Auditor B `Audit` is filtered out by attester *identity*
+(same type, different package), and the `InternalNote` has no registered Display.
+`@demo/dependency`'s only audit is revoked, so it shows no live attestations.
+Revoked attestations remain readable from each subject's revoked box — a consumer
+typically lists them separately so they don't read as endorsements.

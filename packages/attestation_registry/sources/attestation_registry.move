@@ -102,9 +102,9 @@ public fun data<T: store>(self: &Attestation<T>): &T { &self.data }
 /// The subject a `Box` holds attestations about.
 public fun box_subject(box: &Box): ID { box.key.subject }
 
-/// Whether `box` is the subject's revoked box. An attestation's status is the
-/// `box_revoked` of the box that owns it.
-public fun box_revoked(box: &Box): bool { box.key.revoked }
+/// Whether `box` is the subject's revoked box. An attestation's status is
+/// `is_revoked` of the box that owns it.
+public fun is_revoked(box: &Box): bool { box.key.revoked }
 
 /// Test-only: address of a subject's active (`revoked == false`) or revoked
 /// (`revoked == true`) box. Tests use it to locate the two boxes; production

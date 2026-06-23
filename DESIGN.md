@@ -56,7 +56,7 @@ Registry (shared singleton)
 The Box is a real object (not just a derived address) because it stores its
 `BoxKey` — so a viewer knows the subject and which box, the address is
 recomputable, and an attestation's status is readable on-chain as
-`box_revoked(owner)` — and its parent `registry: ID`, so `revoke` can derive the
+`is_revoked(owner)` — and its parent `registry: ID`, so `revoke` can derive the
 sibling box without `&Registry`. It also gives `transfer::receive` a `&mut UID`
 to borrow at the address; without an object there, nothing could receive an
 attestation back. Earlier iterations encoded status as an on-chain `enum Status`
