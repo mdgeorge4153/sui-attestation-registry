@@ -3,21 +3,20 @@
 #   - kill any prior `sui start --with-faucet` localnet
 #   - start a fresh one
 #   - test-publish all packages, upgrade auditor_a, register Displays
-#   - run the shell demo (scripts/demo.sh)
+#   - run the shell demo (demo/scripts/demo.sh)
 #   - kill the localnet on exit (success or failure)
 #
 # Usage:
-#   bash scripts/run-demo.sh                    # uses default `sui` on PATH
-#   SUI=/path/to/sui bash scripts/run-demo.sh   # override sui binary
-#   WITH_GRAPHQL=1 bash scripts/run-demo.sh     # also start GraphQL (:9125),
-#                                               # needed by the MVR integration
-#                                               # (requires a local Postgres).
-#                                               # The TS demo itself uses gRPC
-#                                               # and does not need it.
+#   bash demo/scripts/run-demo.sh                  # default `sui` on PATH
+#   SUI=/path/to/sui bash demo/scripts/run-demo.sh # override the sui binary
+#   WITH_GRAPHQL=1 bash demo/scripts/run-demo.sh   # also start GraphQL (:9125),
+#                                                  # for the MVR integration
+#                                                  # (requires a local Postgres;
+#                                                  # the demo itself uses gRPC).
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SUI="${SUI:-sui}"
 LOCALNET_LOG="/tmp/sui-localnet-$$.log"
 
@@ -74,7 +73,7 @@ echo "▶ switching sui client to local + faucet"
 sleep 2
 
 echo "▶ test-publish"
-SETUP_OUT=$(SUI="$SUI" bash "$REPO_ROOT/scripts/test-publish.sh")
+SETUP_OUT=$(SUI="$SUI" bash "$REPO_ROOT/demo/scripts/test-publish.sh")
 printf '%s\n' "$SETUP_OUT"
 
 REGISTRY_ID=$(printf '%s\n' "$SETUP_OUT" \
@@ -86,7 +85,7 @@ fi
 
 echo
 echo "▶ demo"
-REGISTRY_ID="$REGISTRY_ID" bash "$REPO_ROOT/scripts/demo.sh"
+REGISTRY_ID="$REGISTRY_ID" bash "$REPO_ROOT/demo/scripts/demo.sh"
 
 echo
 echo "▶ done"

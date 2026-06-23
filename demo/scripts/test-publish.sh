@@ -17,15 +17,15 @@
 # *upgraded* id — exercising the schema-evolution path.
 #
 # Prints the Registry shared-object id so it can be exported as REGISTRY_ID
-# for the TS demo.
+# for the demo.
 #
 # Usage:
-#   ./scripts/test-publish.sh                  # uses Pub.localnet.toml at repo root
-#   ./scripts/test-publish.sh /custom/path.toml
+#   ./demo/scripts/test-publish.sh                  # uses Pub.localnet.toml at repo root
+#   ./demo/scripts/test-publish.sh /custom/path.toml
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PUBFILE="${1:-$REPO_ROOT/Pub.localnet.toml}"
 PUBFILE="$(cd "$(dirname "$PUBFILE")" && pwd)/$(basename "$PUBFILE")"
 
@@ -175,7 +175,7 @@ if [[ -n "$REGISTRY_ID" ]]; then
     echo "Registry shared object: $REGISTRY_ID"
     echo
     echo "Run the demo with:"
-    echo "  REGISTRY_ID=$REGISTRY_ID bash scripts/demo.sh"
+    echo "  REGISTRY_ID=$REGISTRY_ID bash demo/scripts/demo.sh"
 else
     echo
     echo "(couldn't extract Registry id from attestation_registry's publish output;"

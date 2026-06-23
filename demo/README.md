@@ -1,7 +1,7 @@
 # Demo fixtures
 
 Move packages that exist only to drive the local end-to-end demo
-(`scripts/run-demo.sh`). Unlike `examples/`, nothing here is meant to be reused —
+(`demo/scripts/run-demo.sh`). Unlike `examples/`, nothing here is meant to be reused —
 these are throwaway identities and subjects.
 
 ## Auditors
@@ -29,7 +29,7 @@ a consumer surfaces one and ignores the other purely by package address.
 
 ## The scenario
 
-`scripts/run-demo.sh` (via `scripts/demo.sh`) publishes these packages, then has
+`demo/scripts/run-demo.sh` (via `demo/scripts/demo.sh`) publishes these packages, then has
 `auditor_a` issue and revoke attestations (plus one from the untrusted
 `auditor_b`). Keep this in sync with `demo.sh`.
 

@@ -2,7 +2,7 @@
 ///
 /// This module lives outside `sources/` so it is absent from the initial
 /// publish. The publish script copies it into `sources/` only for the
-/// upgrade step (see `scripts/test-publish.sh`). As a result `AuditV2`'s
+/// upgrade step (see `demo/scripts/test-publish.sh`). As a result `AuditV2`'s
 /// defining (origin) package id is the *upgraded* package id — distinct from
 /// auditor_a's original publish id — while `attester_of<AuditV2>()` still
 /// resolves to the original id. That mismatch is exactly the schema-evolution

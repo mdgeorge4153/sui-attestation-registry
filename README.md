@@ -21,7 +21,8 @@ demo/                         — fixtures that exist only to drive the local de
   auditor_b/                  — a second copy; NOT trusted (the identity-based-trust demo)
   dependency_example/         — a subject; dependency of subject_example
   subject_example/            — the browsed subject (depends on dependency_example)
-scripts/                      — shell demo: run-demo.sh + composable ptb ops (ops/)
+  scripts/                    — demo orchestration: run-demo.sh, test-publish.sh, demo.sh
+scripts/                      — reusable CLI ops: create-box, attest-audit, revoke-audit
 CONVENTIONS.md                — Display-field conventions (expires_at, …)
 FUTURE-EXTENSIONS.md          — design memos for surfaces deliberately deferred from v0
 ```
@@ -82,14 +83,14 @@ subject keeps its `AuditV2` as the live signal).
 ### One-command (recommended for iteration)
 
 ```bash
-bash scripts/run-demo.sh
+bash demo/scripts/run-demo.sh
 ```
 
-`scripts/run-demo.sh` owns the full lifecycle: kills any stale localnet,
+`demo/scripts/run-demo.sh` owns the full lifecycle: kills any stale localnet,
 starts a fresh `sui start --with-faucet`, waits for the JSON-RPC and faucet
 ports, faucets gas, test-publishes all packages, registers Displays,
 runs the demo, and **kills the localnet on exit** (success or failure).
-Override the sui CLI binary with `SUI=/path/to/sui bash scripts/run-demo.sh`.
+Override the sui CLI binary with `SUI=/path/to/sui bash demo/scripts/run-demo.sh`.
 
 ### Step-by-step (testnet or manual exploration)
 
@@ -114,7 +115,7 @@ Prerequisites:
    Displays. The script does the whole sequence in one go and prints the
    `REGISTRY_ID=…` export line you'll need next:
    ```bash
-   ./scripts/test-publish.sh
+   ./demo/scripts/test-publish.sh
    ```
    That writes `Pub.localnet.toml` at the repo root (gitignored — ephemeral
    and per-user).
@@ -127,10 +128,10 @@ Prerequisites:
 Then run the demo (it reads `Pub.localnet.toml` and `REGISTRY_ID`):
 
 ```bash
-bash scripts/demo.sh
+bash demo/scripts/demo.sh
 ```
 
-`scripts/demo.sh` composes the `scripts/ops/` CLI ops (create-box, attest-audit,
+`demo/scripts/demo.sh` composes the `scripts/` CLI ops (create-box, attest-audit,
 revoke-audit): it creates the boxes, issues the audits, revokes two of them, and
 writes `demo-ids.json` for the MVR seeder, printing each step's object ids.
 

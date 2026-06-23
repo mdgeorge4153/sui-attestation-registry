@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end demo, composed from the CLI ops in scripts/ops/ (create-box,
+# End-to-end demo, composed from the CLI ops in scripts/ (create-box,
 # attest-audit, revoke-audit) plus a few inline `sui client ptb` calls. Replaces
 # the old TS demo — every on-chain action here is a plain CLI
 # move-call a user could run by hand.
@@ -18,15 +18,15 @@
 # active sui client address funded and holding the AuditAdminCap.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OPS="$REPO_ROOT/scripts/ops"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+OPS="$REPO_ROOT/scripts"
 RPC="${RPC:-http://127.0.0.1:9000}"
 PUBFILE="${PUBFILE:-$REPO_ROOT/Pub.localnet.toml}"
 REGISTRY="${REGISTRY_ID:?REGISTRY_ID is required (printed by test-publish.sh)}"
 
 # Read a field (e.g. published-at) from the pubfile's [[published]] block for
 # `<pkg>`. The pubfile is TOML-ish text we just scan per block — python is the
-# simplest tool for that. (Same helper as scripts/test-publish.sh.)
+# simplest tool for that. (Same helper as demo/scripts/test-publish.sh.)
 parse_pkg_field() {
     python3 - "$PUBFILE" "$1" "$2" <<'PY'
 import re, sys
