@@ -17,8 +17,9 @@ The whole design follows from four choices:
 - **Attester = `T`'s defining package.** The attester recorded for an
   `Attestation<T>` is `type_name::original_id<T>()` — the original publish
   address of `T`'s defining package, not the signer. This is
-  bytecode-verifiable: an `Attestation<T>` can only exist because `T`'s package
-  minted it, since Move restricts constructing a `T` value to that package.
+  bytecode-verifiable: `attest` is gated by `Permit<T>`, which only `T`'s
+  defining module can mint — so an `Attestation<T>` can only exist because `T`'s
+  package authorized it.
 - **Permanent, `key`-only attestations.** `Attestation<T>` has `key` only, and
   no public function returns one by value, so external callers can't transfer,
   wrap, or drop it. Once created it cannot be destroyed; its only dispositions
@@ -49,12 +50,13 @@ Registry (shared singleton)
   subject's un-revoked attestations from the active box via
   `getOwnedObjects(box_addr, filter={StructType: ...})`, with native
   server-side type filtering.
-- **`Attestation<T: store>`** is owned by the active Box via
-  `transfer::transfer(attestation, box.id.to_address())`; `revoke` moves it to
-  the revoked box.
+- **`Attestation<T: store>`** is transferred to the active box *address*
+  (`derive_address(registry, {subject, false})`) — `attest` needs no `Box`
+  object, so the box can be created lazily; `revoke` moves it to the revoked box.
 
-The Box is a real object (not just a derived address) because it stores its
-`BoxKey` — so a viewer knows the subject and which box, the address is
+The Box is a real object (not just a derived address) — needed by `revoke` and
+on-chain viewing, not by `attest` — because it stores its
+`BoxKey` so a viewer knows the subject and which box, the address is
 recomputable, and an attestation's status is readable on-chain as
 `is_revoked(owner)` — and its parent `registry: ID`, so `revoke` can derive the
 sibling box without `&Registry`. It also gives `transfer::receive` a `&mut UID`
@@ -103,25 +105,27 @@ Because the attester is `T`'s defining package rather than the signer:
   type-level attester is still the schema package; the per-attestation signer
   lives in the data.
 
-`attest` is *not* gated by `Permit<T>` — Move's construction rule does that job.
-`register_display` and `revoke` *are*, because authority over an attestation's
-presentation and lifecycle is distinct from the authority to construct its data
-(without the permit, anyone holding a `T` could race to register
-`Display<Attestation<T>>` for that type).
+`attest`, `register_display`, and `revoke` are **uniformly gated by
+`Permit<T>`**, which only `T`'s defining module can mint. The permit — not the
+mere ability to construct a `T` — is the authority, so the model holds even
+where a schema exposes a public constructor for `T` (permissionless schemas do,
+on purpose): such a schema exposes a public `attest` *wrapper* that mints the
+permit, not a bare path to forge `Attestation<T>` from a stray `T` value.
 
 ## Revocation: `Permit<T>`-gated, policy in the schema
 
 ```move
-public fun attest<T: store>(box: &Box, data, ctx): ID
+public fun attest<T: store>(registry: &Registry, subject: ID, _: Permit<T>, data, ctx): ID
 public fun revoke<T: store>(box: &mut Box, _: Permit<T>, rcv: Receiving<Attestation<T>>)
 ```
 
-`attest` takes the subject's active `Box` (aborts if handed the revoked one) and
-returns the new attestation's `ID` — the one piece a schema can't otherwise
-recover, since the object goes straight to the Box — so a schema can bind a
-bearer cap to it, log it, or ignore it. `revoke` receives the attestation and
-moves it to the revoked box (address derived from the Box's stored `registry`),
-emitting `Revoked<T>`.
+`attest` transfers the attestation to `subject`'s active box *address* (derived
+from the registry id) and returns its `ID` — the one piece a schema can't
+otherwise recover, since the object goes straight to the box — so a schema can
+bind a bearer cap to it, log it, or ignore it. It takes no `Box`, so the box
+need not exist yet; `create_box` is only a prerequisite for `revoke`. `revoke`
+receives the attestation and moves it to the revoked box (address derived from
+the Box's stored `registry`), emitting `Revoked<T>`.
 
 The move and event stay uniform here; the *authority* does not. `revoke` is
 gated by `Permit<T>`, which only `T`'s defining module can mint, so the base
@@ -137,16 +141,16 @@ bytecode-provable irrevocability; a schema is permanent only by exposing no
 revoke path. That's weaker than burning a cap, but upgrade authority is already
 attestation-dynamics authority.
 
-## Display registration: park the DisplayCap on the Registry
+## Display registration: parked cap, append-only Display
 
 `register_display<T>(...)` creates `Display<Attestation<T>>`, applies the
 schema's fields, shares it, and transfers the `DisplayCap` to the Registry's
-address (TTO). The cap authorizes `set`/`unset`/`clear`, so the template is
-meant to be immutable — but the framework exposes no way to destroy a
-DisplayCap. Parking it on the Registry keeps it out of circulation without
-minting an extra immovable wrapper, and a future upgrade could destroy it if a
-`DisplayCap::destroy` ever lands. (An earlier iteration froze a wrapper struct
-around the cap; owning it on the Registry is simpler.)
+address (TTO). The cap is *kept*, not destroyed: `add_display_field<T>` lets the
+schema (gated by `Permit<T>`) receive it, append fields, and re-park it. Adding
+is allowed; altering or removing an existing field is not — `add_display_field`
+aborts on a field name that's already set, and no other public path exposes the
+cap's `set`-overwrite / `unset` / `clear`. So the Display is effectively
+**append-only**: a schema can grow its template over time but can't rewrite it.
 
 ## Events: phantom T, minimal payload
 

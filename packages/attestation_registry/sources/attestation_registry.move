@@ -4,7 +4,7 @@ use std::internal::Permit;
 use std::string::String;
 use std::type_name;
 use sui::derived_object;
-use sui::display_registry::{Self, DisplayRegistry};
+use sui::display_registry::{Self, DisplayRegistry, Display, DisplayCap};
 use sui::event;
 use sui::transfer::Receiving;
 
@@ -15,6 +15,10 @@ const EBoxAlreadyExists: vector<u8> =
 #[error(code = 1)]
 const EBoxRevoked: vector<u8> =
     b"Pass the subject's active Box, not its revoked one";
+
+#[error(code = 2)]
+const EFieldExists: vector<u8> =
+    b"Display field already exists; add_display_field is append-only";
 
 /// Shared singleton, parent UID for every per-subject `Box`.
 public struct Registry has key {
@@ -122,17 +126,28 @@ public fun attester_of<T>(): address { type_name::original_id<T>() }
 
 // === Attest / Revoke ===
 
-/// Attest about `box`'s subject with `data`. Pass the subject's *active* `Box`
-/// (aborts `EBoxRevoked` otherwise). Returns the new attestation's `ID` — the
-/// one piece a schema can't otherwise recover (the object goes straight to the
-/// box), so it can build whatever revocation authority it wants.
-public fun attest<T: store>(box: &Box, data: T, ctx: &mut TxContext): ID {
-    assert!(!box.key.revoked, EBoxRevoked);
-    let subject = box.key.subject;
+/// Attest about `subject` with `data`. Gated by `Permit<T>`: only `T`'s
+/// defining module can mint one, so authority to attest lives in that module —
+/// uniform with `revoke` and `register_display`. The attestation goes to
+/// `subject`'s *active* box address (`derive_address(registry, {subject,
+/// false})`); the box need not exist yet — only `revoke` needs the `Box`
+/// object. Returns the new attestation's `ID`, the one piece a schema can't
+/// otherwise recover since the object goes straight to the box.
+public fun attest<T: store>(
+    registry: &Registry,
+    subject: ID,
+    _: Permit<T>,
+    data: T,
+    ctx: &mut TxContext,
+): ID {
     let attestation = Attestation<T> { id: object::new(ctx), subject, data };
     let attestation_id = object::id(&attestation);
+    let box_addr = derived_object::derive_address(
+        object::id(registry),
+        BoxKey { subject, revoked: false },
+    );
     event::emit(Attested<T> { subject });
-    transfer::transfer(attestation, box.id.to_address());
+    transfer::transfer(attestation, box_addr);
     attestation_id
 }
 
@@ -162,9 +177,11 @@ public fun revoke<T: store>(
 
 // === Display ===
 
-/// Publish an immutable `Display<Attestation<T>>` via the system display
-/// registry. Authorized by `Permit<T>` (only `T`'s defining module can mint
-/// it); one-per-T enforcement is provided by `display_registry`.
+/// Publish a `Display<Attestation<T>>` via the system display registry.
+/// Authorized by `Permit<T>` (only `T`'s defining module can mint it);
+/// one-per-T enforcement is provided by `display_registry`. The `DisplayCap` is
+/// parked on the Registry so the schema can later append fields via
+/// `add_display_field` (add-only).
 ///
 /// Template strings in `values` reference fields of `Attestation<T>`:
 /// - Top-level: `{subject}`, `{data}`
@@ -189,11 +206,31 @@ public fun register_display<T: store>(
     fields.zip_do!(values, |field, value| display.set(&cap, field, value));
     display_registry::share(display);
 
-    // The Display is meant to be immutable, but `DisplayCap` has no destroy.
-    // Park it on the Registry: it can't be used to mutate the Display from
-    // there, it's one fewer floating object than a frozen wrapper, and a
-    // future upgrade could destroy it.
-    // TODO: revisit if `DisplayCap::destroy` (or similar) lands.
+    // Park the `DisplayCap` on the Registry. It's kept (not destroyed) so the
+    // schema can later append fields via `add_display_field`, which receives
+    // it, adds, and re-parks. No public path here exposes `set`-overwrite,
+    // `unset`, or `clear`, so the Display is effectively append-only.
+    transfer::public_transfer(cap, object::id(registry).to_address());
+}
+
+/// Append fields to an existing `Display<Attestation<T>>`. **Add-only**: aborts
+/// `EFieldExists` if a field name is already set, so existing fields can't be
+/// altered or removed. Gated by `Permit<T>` like `register_display`. `rcv`
+/// receives the `DisplayCap` that `register_display` parked on the Registry
+/// (found off-chain as the lone `DisplayCap<Attestation<T>>` the Registry owns).
+public fun add_display_field<T: store>(
+    registry: &mut Registry,
+    display: &mut Display<Attestation<T>>,
+    rcv: Receiving<DisplayCap<Attestation<T>>>,
+    fields: vector<String>,
+    values: vector<String>,
+    _: Permit<T>,
+) {
+    let cap = transfer::public_receive(&mut registry.id, rcv);
+    fields.zip_do!(values, |field, value| {
+        assert!(!display.fields().contains(&field), EFieldExists);
+        display.set(&cap, field, value);
+    });
     transfer::public_transfer(cap, object::id(registry).to_address());
 }
 

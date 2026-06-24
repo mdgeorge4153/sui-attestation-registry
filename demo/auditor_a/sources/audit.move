@@ -54,16 +54,24 @@ public fun register_audit_display(
     );
 }
 
-/// Issue an Audit attestation into `box` (the subject's active box). Gated by
-/// the `AuditAdminCap`, the single authority over this auditor's attestations.
+/// Issue an `Attestation<Audit>` about `subject`. Gated by the `AuditAdminCap`,
+/// the single authority over this auditor's attestations; mints the
+/// `Permit<Audit>` the registry's `attest` requires (only this module can).
 public fun attest_audit(
     _: &AuditAdminCap,
-    box: &Box,
+    registry: &Registry,
+    subject: ID,
     score: u8,
     report_url: String,
     ctx: &mut TxContext,
 ) {
-    attestation_registry::attest<Audit>(box, Audit { score, report_url }, ctx);
+    attestation_registry::attest<Audit>(
+        registry,
+        subject,
+        std::internal::permit<Audit>(),
+        Audit { score, report_url },
+        ctx,
+    );
 }
 
 /// Revoke an `Attestation<Audit>`. Gated by the `AuditAdminCap`; mints the

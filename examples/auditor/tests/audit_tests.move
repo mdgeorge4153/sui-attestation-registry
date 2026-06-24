@@ -18,9 +18,9 @@ fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
     )
 }
 
-/// Verifies the cross-package attest flow: `auditor::attest_audit`
-/// produces an accessible attestation, and `attester_of<Audit>` returns
-/// auditor's package address — distinct from `attestation_registry`'s.
+/// Verifies the cross-package attest flow: `auditor::attest_audit` produces an
+/// accessible attestation, and `attester_of<Audit>` returns auditor's package
+/// address — distinct from `attestation_registry`'s.
 #[test]
 fun test_attest_audit_cross_package() {
     let subject = subject_for(@0xDEAD);
@@ -31,14 +31,10 @@ fun test_attest_audit_cross_package() {
     let mut registry: Registry = scenario.take_shared();
     attestation_registry::create_box(&mut registry, subject);
     let active = box_id(&registry, subject, false);
-    test_scenario::return_shared(registry);
-
-    scenario.next_tx(ALICE);
-    let active_box: Box = scenario.take_shared_by_id(active);
     let admin = audit::new_admin_cap_for_testing(scenario.ctx());
-    audit::attest_audit(&admin, &active_box, 9, report_url(), scenario.ctx());
+    audit::attest_audit(&admin, &registry, subject, 9, report_url(), scenario.ctx());
     transfer::public_transfer(admin, ALICE);
-    test_scenario::return_shared(active_box);
+    test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
     let mut box: Box = scenario.take_shared_by_id(active);
@@ -74,13 +70,9 @@ fun test_revoke_audit_with_admin_cap() {
     attestation_registry::create_box(&mut registry, subject);
     let active = box_id(&registry, subject, false);
     let revoked = box_id(&registry, subject, true);
-    test_scenario::return_shared(registry);
-
-    scenario.next_tx(ALICE);
-    let active_box: Box = scenario.take_shared_by_id(active);
     let admin = audit::new_admin_cap_for_testing(scenario.ctx());
-    audit::attest_audit(&admin, &active_box, 9, report_url(), scenario.ctx());
-    test_scenario::return_shared(active_box);
+    audit::attest_audit(&admin, &registry, subject, 9, report_url(), scenario.ctx());
+    test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
     let box: Box = scenario.take_shared_by_id(active);

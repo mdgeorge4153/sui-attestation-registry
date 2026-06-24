@@ -1,53 +1,45 @@
 # Display Conventions
 
 `attestation_registry` keeps its core type minimal — `Attestation<T>` has a
-`subject` and `data: T`. Cross-cutting behaviors that schemas might want
-(expiration, etc.) are expressed as **Display field conventions** rather than
-additional Move types. Off-chain consumers (wallets, explorers, apps)
-recognize these conventional field names and apply the corresponding
-semantics when evaluating trust.
+`subject` and `data: T`. Cross-cutting behaviors that schemas might want (a
+report's publication date, etc.) are expressed as **Display field conventions**
+rather than additional Move types. Off-chain consumers (wallets, explorers, apps)
+recognize these conventional field names and apply the corresponding semantics
+when evaluating or presenting an attestation.
 
 The benefit of conventions-over-functors is composability: a schema can adopt
 zero, one, or many of these by including the corresponding fields in its
 `register_display` call. Combining them doesn't require nested type wrappers
-(`WithExpiry<Audit<OtterSec>>`) — the schema just lists the
-fields it surfaces, and conventions stack naturally.
+(`WithExpiry<Audit<OtterSec>>`) — the schema just lists the fields it surfaces,
+and conventions stack naturally.
 
 ## Base effectiveness
 
-Revocation is **not** a convention — it's structural. An attestation lives in
-its subject's *active* box; `revoke` moves it to the subject's *revoked* box. So
-a consumer that enumerates a subject's active box only ever sees un-revoked
-attestations — revocation needs no field to read, and there is no `active` flag
-to consult. The conventions below add *further* effectiveness conditions (e.g.
-expiry) on top of attestations already known to be active.
+Effectiveness is purely structural: an attestation is effective iff it lives in
+its subject's *active* box. `revoke` moves it to the subject's *revoked* box, so
+a consumer enumerating the active box only ever sees un-revoked attestations —
+no field to read, no `active` flag. No *current* convention adds further
+effectiveness conditions; the planned `expires_at` (see below) would.
 
 ## Conventions
 
-### `expires_at`
+### `publish_date`
 
-An attestation is **effective** only when current time is before the value of
-its `expires_at` Display field. Absence of the field means the attestation
-never expires.
-
-The field's rendered type is a timestamp. Recommended template form using
-Display V2's `:ts` transform on a `u64` field:
+The publication date of the attested artifact (e.g. an audit report), surfaced
+as the `publish_date` Display field so consumers can show "published on …".
+**Informational** — it does not affect effectiveness. Rendered from a `u64` ms
+field via Display V2's `:ts` transform:
 
 ```move
-fields.push_back(b"expires_at".to_string());
-values.push_back(b"{data.expires_at_ms:ts}".to_string());
+fields.push_back(b"publish_date".to_string());
+values.push_back(b"{data.publish_date_ms:ts}".to_string());
 ```
 
-This requires the schema's `T` to include an `expires_at_ms: u64` field. The
-schema decides how that field is populated (always-present, sentinel for
-"never expires," etc.).
-
-Off-chain evaluator pseudocode:
-
-```ts
-const expiresAt = parseTimestamp(attestation.display?.expires_at);
-const expired = expiresAt !== null && Date.now() >= expiresAt;
-```
+Because it's a Display field it's *attester-supplied* — an attester could
+backdate it. That's an accepted trade-off: tamper-proof publication time would
+need on-chain timestamping in the core (a `Clock` read inside `attest`), out of
+scope for an off-chain-primary registry. A consumer needing a trustworthy "first
+seen" can use the attestation object's on-chain creation time instead.
 
 ## Presentation fields
 
@@ -81,22 +73,29 @@ values.push_back(b"{data.report_url}".to_string());
 ## Adding a new convention
 
 A new convention is an additive change: define the field name, its rendered
-type, the effectiveness rule, and document it here. Existing schemas continue
-to work; schemas adopting the new convention add the field to their
-`register_display` call.
+type, the effectiveness rule (if any), and document it here. Existing schemas
+continue to work; schemas adopting the new convention add the field to their
+`register_display` call (or `add_display_field`, for an already-published
+Display).
 
 If a convention requires on-chain enforcement (e.g., a verifier contract that
 needs `is_effective` to apply expiration without an off-chain hop), it should
 graduate from this document into a typed Move helper. None of the conventions
-above are at that point yet.
+here are at that point yet.
 
 ## Planned future conventions
 
-The "negative" attestation schemas (vulnerability disclosures) — a fast-follow,
-not yet shipped — will add two more conventional fields:
+Conventions we've specified but not yet shipped:
 
+- **`expires_at`** — an *effectiveness* convention: an attestation is effective
+  only while current time is before its `expires_at` Display field (absent =
+  never expires), rendered from a `u64` ms field via `{data.expires_at_ms:ts}`.
+  Unused so far — the audit schema doesn't expire — so it's parked here until a
+  schema needs it. Off-chain check:
+  `expiresAt !== null && Date.now() >= expiresAt`.
 - **`polarity`** — distinguishes a *negative* attestation (a warning, e.g. a
-  disclosed vulnerability) from a *positive* one (an endorsement, e.g. an
-  audit), so consumers render and weigh the two differently.
-- **`severity`** — for vulnerability disclosures, a CVSS-style severity band,
-  so consumers can rank or threshold disclosures.
+  disclosed vulnerability) from a *positive* one (an endorsement, e.g. an audit),
+  so consumers render and weigh the two differently. (negative-attestation
+  fast-follow.)
+- **`severity`** — for vulnerability disclosures, a CVSS-style severity band, so
+  consumers can rank or threshold disclosures. (negative-attestation fast-follow.)

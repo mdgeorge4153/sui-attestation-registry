@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Issue an Attestation<Audit> into a subject's active box and echo its id.
-# Reusable CLI op over auditor::attest_audit (admin-cap-gated); the
-# auditor's AuditAdminCap gates both attest and revoke.
+# Issue an Attestation<Audit> about a subject and echo its id. Reusable CLI op
+# over auditor::attest_audit (admin-cap-gated); the AuditAdminCap gates both
+# attest and revoke. The subject's box need not exist yet (only revoke needs it).
 #
-# Usage: attest-audit.sh <audit-pkg> <admin-cap> <active-box> <score-u8> <report-url>
+# Usage: attest-audit.sh <audit-pkg> <admin-cap> <registry> <subject> <score-u8> <report-url>
 set -euo pipefail
-AUDITPKG=$1; CAP=$2; BOX=$3; SCORE=$4; URL=$5
+AUDITPKG=$1; CAP=$2; REGISTRY=$3; SUBJECT=$4; SCORE=$5; URL=$6
 
 sui client ptb \
-    --move-call "$AUDITPKG::audit::attest_audit" "@$CAP" "@$BOX" "$SCORE" "\"$URL\"" \
+    --move-call "$AUDITPKG::audit::attest_audit" "@$CAP" "@$REGISTRY" "@$SUBJECT" "$SCORE" "\"$URL\"" \
     --gas-budget 100000000 --json \
   | jq -r '.objectChanges[] | select(.objectType | contains("::Attestation<")) | .objectId'
