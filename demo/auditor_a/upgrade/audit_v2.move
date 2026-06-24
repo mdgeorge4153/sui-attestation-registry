@@ -11,7 +11,7 @@
 module auditor_a::audit_v2;
 
 use std::string::String;
-use sui::display_registry::DisplayRegistry;
+use sui::display_registry::{DisplayRegistry, Display, DisplayCap};
 use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
 use auditor_a::audit::AuditAdminCap;
@@ -21,10 +21,15 @@ public struct AuditV2 has store, drop {
     score: u8,
     /// URL of the full audit report (surfaced via the `link` convention).
     report_url: String,
+    /// Report publication date (ms since epoch), surfaced via the
+    /// `publish_date` convention.
+    publish_date_ms: u64,
 }
 
-/// One-shot setup: register the immutable `Display<Attestation<AuditV2>>`,
-/// including the `link` convention field.
+/// One-shot setup: register the append-only `Display<Attestation<AuditV2>>`
+/// with the `link` and `publish_date` convention fields. The `methodology`
+/// field is added later via `add_audit_v2_methodology_display`, to exercise
+/// `add_display_field`.
 public fun register_audit_v2_display(
     registry: &Registry,
     display_registry: &mut DisplayRegistry,
@@ -37,14 +42,36 @@ public fun register_audit_v2_display(
             b"name".to_string(),
             b"description".to_string(),
             b"link".to_string(),
+            b"publish_date".to_string(),
         ],
         vector[
             b"Audit attestation (v2)".to_string(),
             b"Score: {data.score}/100".to_string(),
             b"{data.report_url}".to_string(),
+            b"{data.publish_date_ms:ts}".to_string(),
         ],
         std::internal::permit<AuditV2>(),
         ctx,
+    );
+}
+
+/// Append a static `methodology` field to the already-published
+/// `Display<Attestation<AuditV2>>` — a worked example of `add_display_field`.
+/// Gated by `Permit<AuditV2>`; `rcv` is the `DisplayCap` that
+/// `register_audit_v2_display` parked on the Registry. Append-only: it can't
+/// alter or remove existing fields.
+public fun add_audit_v2_methodology_display(
+    registry: &mut Registry,
+    display: &mut Display<Attestation<AuditV2>>,
+    rcv: Receiving<DisplayCap<Attestation<AuditV2>>>,
+) {
+    attestation_registry::add_display_field(
+        registry,
+        display,
+        rcv,
+        vector[b"methodology".to_string()],
+        vector[b"https://auditor-a.example/methodology".to_string()],
+        std::internal::permit<AuditV2>(),
     );
 }
 
@@ -56,13 +83,14 @@ public fun attest_audit_v2(
     subject: ID,
     score: u8,
     report_url: String,
+    publish_date_ms: u64,
     ctx: &mut TxContext,
 ) {
     attestation_registry::attest<AuditV2>(
         registry,
         subject,
         std::internal::permit<AuditV2>(),
-        AuditV2 { score, report_url },
+        AuditV2 { score, report_url, publish_date_ms },
         ctx,
     );
 }

@@ -164,8 +164,30 @@ else
     }
 
     register_display register_audit_display     "$PKG_AUDIT"     audit      register_audit_display
-    register_display register_audit_v2_display  "$PKG_AUDIT"     audit_v2   register_audit_v2_display
-    register_display register_auditor_b_display  "$PKG_AUDITOR_B" audit      register_audit_display
+    register_display register_auditor_b_display "$PKG_AUDITOR_B" audit      register_audit_display
+
+    # AuditV2: register its Display, then APPEND a `methodology` field via
+    # add_display_field — a runtime exercise of add_display_field. The shared
+    # Display and the parked DisplayCap come straight from the register tx's
+    # objectChanges (no off-chain lookup needed).
+    echo
+    echo "▶ register_audit_v2_display + add_display_field(methodology)"
+    if v2reg=$(cd "$AUDIT_DIR" && "$SUI" client call \
+            --package "$PKG_AUDIT" --module audit_v2 --function register_audit_v2_display \
+            --args "$REGISTRY_ID" "$DISPLAY_REGISTRY" \
+            --gas-budget "$GAS_BUDGET" --json 2>/dev/null); then
+        V2_DISPLAY=$(printf '%s' "$v2reg" | jq -r '.objectChanges[] | select(.objectType | test("display_registry::Display<.*AuditV2")) | .objectId')
+        V2_CAP=$(printf '%s' "$v2reg" | jq -r '.objectChanges[] | select(.objectType | test("display_registry::DisplayCap<.*AuditV2")) | .objectId')
+        if "$SUI" client ptb \
+                --move-call "$PKG_AUDIT::audit_v2::add_audit_v2_methodology_display" "@$REGISTRY_ID" "@$V2_DISPLAY" "@$V2_CAP" \
+                --gas-budget "$GAS_BUDGET" >/dev/null 2>&1; then
+            echo "  ok (+methodology)"
+        else
+            echo "  add_display_field FAILED"
+        fi
+    else
+        echo "  register_audit_v2_display FAILED (Display may already exist)"
+    fi
 fi
 
 echo

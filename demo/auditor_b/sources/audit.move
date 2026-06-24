@@ -12,6 +12,9 @@ public struct Audit has store, drop {
     score: u8,
     /// URL of the full audit report (surfaced via the `link` convention).
     report_url: String,
+    /// Report publication date (ms since epoch), surfaced via the
+    /// `publish_date` convention.
+    publish_date_ms: u64,
 }
 
 /// Single-party authority to *control* this auditor's attestations: whoever
@@ -28,7 +31,7 @@ fun init(ctx: &mut TxContext) {
     transfer::transfer(AuditAdminCap { id: object::new(ctx) }, ctx.sender());
 }
 
-/// One-shot setup: register the immutable `Display<Attestation<Audit>>`.
+/// One-shot setup: register the append-only `Display<Attestation<Audit>>`.
 /// Should be called once shortly after publish; aborts on second call
 /// (V2 enforcement via `display_registry`).
 public fun register_audit_display(
@@ -43,11 +46,13 @@ public fun register_audit_display(
             b"name".to_string(),
             b"description".to_string(),
             b"link".to_string(),
+            b"publish_date".to_string(),
         ],
         vector[
             b"Audit attestation".to_string(),
             b"Score: {data.score}/100".to_string(),
             b"{data.report_url}".to_string(),
+            b"{data.publish_date_ms:ts}".to_string(),
         ],
         std::internal::permit<Audit>(),
         ctx,
@@ -63,13 +68,14 @@ public fun attest_audit(
     subject: ID,
     score: u8,
     report_url: String,
+    publish_date_ms: u64,
     ctx: &mut TxContext,
 ) {
     attestation_registry::attest<Audit>(
         registry,
         subject,
         std::internal::permit<Audit>(),
-        Audit { score, report_url },
+        Audit { score, report_url, publish_date_ms },
         ctx,
     );
 }

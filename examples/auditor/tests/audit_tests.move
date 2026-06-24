@@ -11,6 +11,7 @@ const ALICE: address = @0xA11CE;
 
 fun subject_for(addr: address): ID { addr.to_id() }
 fun report_url(): String { b"https://audits.example.com/r.pdf".to_string() }
+fun publish_date(): u64 { 1_700_000_000_000 }
 
 fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
     object::id_from_address(
@@ -32,7 +33,7 @@ fun test_attest_audit_cross_package() {
     attestation_registry::create_box(&mut registry, subject);
     let active = box_id(&registry, subject, false);
     let admin = audit::new_admin_cap_for_testing(scenario.ctx());
-    audit::attest_audit(&admin, &registry, subject, 9, report_url(), scenario.ctx());
+    audit::attest_audit(&admin, &registry, subject, 9, report_url(), publish_date(), scenario.ctx());
     transfer::public_transfer(admin, ALICE);
     test_scenario::return_shared(registry);
 
@@ -71,7 +72,7 @@ fun test_revoke_audit_with_admin_cap() {
     let active = box_id(&registry, subject, false);
     let revoked = box_id(&registry, subject, true);
     let admin = audit::new_admin_cap_for_testing(scenario.ctx());
-    audit::attest_audit(&admin, &registry, subject, 9, report_url(), scenario.ctx());
+    audit::attest_audit(&admin, &registry, subject, 9, report_url(), publish_date(), scenario.ctx());
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);

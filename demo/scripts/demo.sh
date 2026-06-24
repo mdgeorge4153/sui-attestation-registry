@@ -63,6 +63,10 @@ echo "registry:    $REGISTRY"
 echo "audit pkg:   $AUDIT (orig $AUDIT_ORIG)"
 echo "admin cap:   $CAP"
 
+# Fixed demo report publication date (ms), surfaced via the publish_date
+# convention. A real auditor passes the actual report date.
+PUBDATE=1748736000000   # 2025-06-01
+
 echo "▶ create boxes (dependency + subject)"
 DEP_BOX=$(bash "$OPS/create-box.sh" "$REGPKG" "$REGISTRY" "$DEP")
 SUBJ_BOX=$(bash "$OPS/create-box.sh" "$REGPKG" "$REGISTRY" "$SUBJ")
@@ -70,18 +74,18 @@ echo "  dependency active box: $DEP_BOX"
 echo "  subject active box:    $SUBJ_BOX"
 
 echo "▶ attest_audit on dependency (score 90, will be revoked)"
-DEP_AUDIT=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$DEP" 90 "https://audits.example.com/dependency-v1.pdf")
+DEP_AUDIT=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$DEP" 90 "https://audits.example.com/dependency-v1.pdf" "$PUBDATE")
 echo "  $DEP_AUDIT"
 
 echo "▶ attest_audit_v2 on subject (score 95, the live signal)"
 SUBJ_AUDIT_V2=$(sui client ptb \
-    --move-call "$AUDIT::audit_v2::attest_audit_v2" "@$CAP" "@$REGISTRY" "@$SUBJ" 95 '"https://audits.example.com/subject-v1.pdf"' \
+    --move-call "$AUDIT::audit_v2::attest_audit_v2" "@$CAP" "@$REGISTRY" "@$SUBJ" 95 '"https://audits.example.com/subject-v1.pdf"' "$PUBDATE" \
     --gas-budget 100000000 --json \
   | jq -r '.objectChanges[] | select(.objectType | contains("::AuditV2>")) | .objectId')
 echo "  $SUBJ_AUDIT_V2"
 
 echo "▶ attest_audit on subject (score 88, will be revoked)"
-SUBJ_AUDIT_V1=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$SUBJ" 88 "https://audits.example.com/subject-v1.pdf")
+SUBJ_AUDIT_V1=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$SUBJ" 88 "https://audits.example.com/subject-v1.pdf" "$PUBDATE")
 echo "  $SUBJ_AUDIT_V1"
 
 echo "▶ Auditor B audit (untrusted identity) + attest_internal_note (both filtered out)"
@@ -89,7 +93,7 @@ echo "▶ Auditor B audit (untrusted identity) + attest_internal_note (both filt
 # config — its Audit is filtered out by *identity*, not by type. Its
 # AuditAdminCap is its own distinct type (auditor_b's id).
 AUDITOR_B_CAP=$(find_owned "$ADDR" "$AUDITOR_B::audit::AuditAdminCap")
-bash "$OPS/attest-audit.sh" "$AUDITOR_B" "$AUDITOR_B_CAP" "$REGISTRY" "$SUBJ" 50 "https://auditor-b.example/r.pdf" >/dev/null
+bash "$OPS/attest-audit.sh" "$AUDITOR_B" "$AUDITOR_B_CAP" "$REGISTRY" "$SUBJ" 50 "https://auditor-b.example/r.pdf" "$PUBDATE" >/dev/null
 sui client ptb \
     --move-call "$AUDIT::audit_v2::attest_internal_note" "@$REGISTRY" "@$SUBJ" '"no Display registered"' \
     --gas-budget 100000000 >/dev/null
