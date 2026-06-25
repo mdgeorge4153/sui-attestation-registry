@@ -9,6 +9,7 @@
 #   demo/auditor_a         -> Audit schema (later upgraded to add AuditV2)
 #   demo/auditor_b             -> a second auditor (Auditor B), NOT in the trusted set
 #   demo/dependency_example        -> a subject, and a dependency of subject_example
+#                                     (upgraded to v2, so it has two versions)
 #   demo/subject_example           -> the browsable subject (depends on dependency_example)
 #
 # The AuditV2 schema lives in demo/auditor_a/upgrade/audit_v2.move,
@@ -42,9 +43,16 @@ AUDIT_DIR="$REPO_ROOT/demo/auditor_a"
 AUDIT_V2_SRC="$AUDIT_DIR/upgrade/audit_v2.move"
 AUDIT_V2_STAGED="$AUDIT_DIR/sources/audit_v2.move"
 
-# Always start the upgrade module un-staged so the initial publish is v1-only,
-# even if a prior run died mid-upgrade and left the copy behind.
-rm -f "$AUDIT_V2_STAGED"
+# The staged dependency_v2 upgrade module and its transient location. Adding
+# this module is a compatible upgrade that gives dependency_example a second
+# published version (the mvr demo's version selector switches between them).
+DEP_DIR="$REPO_ROOT/demo/dependency_example"
+DEP_V2_SRC="$DEP_DIR/upgrade/dependency_v2.move"
+DEP_V2_STAGED="$DEP_DIR/sources/dependency_v2.move"
+
+# Always start the upgrade modules un-staged so the initial publish is v1-only,
+# even if a prior run died mid-upgrade and left a copy behind.
+rm -f "$AUDIT_V2_STAGED" "$DEP_V2_STAGED"
 
 # Remove any prior pubfile so test-publish starts each package from a clean
 # slate. Otherwise existing entries cause re-publish errors.
@@ -137,6 +145,25 @@ if ! (cd "$AUDIT_DIR" \
     exit 1
 fi
 rm -f "$upgrade_out" "$AUDIT_V2_STAGED"
+echo "  ok"
+
+# --- Upgrade dependency_example so it has two published versions. Adding the
+# dependency_v2 module is a compatible upgrade; after it, the pubfile's
+# published-at is the v2 id and original-id is the v1 id. ---
+echo
+echo "▶ upgrade dependency_example (v2)"
+cp "$DEP_V2_SRC" "$DEP_V2_STAGED"
+dep_upgrade_out=$(mktemp)
+if ! (cd "$DEP_DIR" \
+        && "$SUI" client test-upgrade \
+            --build-env testnet --pubfile-path "$PUBFILE" --gas-budget "$GAS_BUDGET") \
+        > "$dep_upgrade_out" 2>&1; then
+    echo "  FAILED. Output:"
+    cat "$dep_upgrade_out"
+    rm -f "$dep_upgrade_out" "$DEP_V2_STAGED"
+    exit 1
+fi
+rm -f "$dep_upgrade_out" "$DEP_V2_STAGED"
 echo "  ok"
 
 # After the upgrade, auditor_a's published-at is the v2 id (which defines

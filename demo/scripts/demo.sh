@@ -5,13 +5,14 @@
 # move-call a user could run by hand.
 #
 # Scenario (mirrors the scenario in demo/README.md):
-#   - create boxes for the dependency and the subject (which depends on it)
-#   - audit the dependency (Audit; revoked at the end)
+#   - the dependency has two published versions (v1, v2); audit v1 (Audit, stays
+#     active) and leave v2 unaudited — so the version selector shows both states
+#   - create boxes for the dependency (v1) and the subject (which depends on it)
 #   - audit the subject with AuditV2 (score 95; the live signal)
 #   - audit the subject with v1 Audit (revoked at the end)
 #   - an Audit from Auditor B (a second, untrusted auditor identity) + an
 #     attest_internal_note on the subject (both filtered out by a trust consumer)
-#   - revoke the dependency audit and the subject's v1 audit
+#   - revoke the subject's v1 audit
 #   - write demo-ids.json for the MVR seeder
 #
 # Requires: REGISTRY_ID env; packages test-published (Pub.localnet.toml); the
@@ -42,7 +43,8 @@ PY
 REGPKG=$(parse_pkg_field attestations published-at)
 AUDIT=$(parse_pkg_field auditor_a published-at)      # v2/latest id (has audit + audit_v2)
 AUDIT_ORIG=$(parse_pkg_field auditor_a original-id)  # v1 id — defines Audit + AuditAdminCap
-DEP=$(parse_pkg_field dependency_example published-at)
+DEP_V1=$(parse_pkg_field dependency_example original-id)   # v1 id (audited)
+DEP_V2=$(parse_pkg_field dependency_example published-at)  # v2 id (unaudited)
 SUBJ=$(parse_pkg_field subject_example published-at)
 AUDITOR_B=$(parse_pkg_field auditor_b published-at)
 
@@ -67,14 +69,14 @@ echo "admin cap:   $CAP"
 # convention. A real auditor passes the actual report date.
 PUBDATE=1748736000000   # 2025-06-01
 
-echo "▶ create boxes (dependency + subject)"
-DEP_BOX=$(bash "$OPS/create-box.sh" "$REGPKG" "$REGISTRY" "$DEP")
+echo "▶ create boxes (dependency v1 + subject)"
+DEP_BOX=$(bash "$OPS/create-box.sh" "$REGPKG" "$REGISTRY" "$DEP_V1")
 SUBJ_BOX=$(bash "$OPS/create-box.sh" "$REGPKG" "$REGISTRY" "$SUBJ")
-echo "  dependency active box: $DEP_BOX"
-echo "  subject active box:    $SUBJ_BOX"
+echo "  dependency v1 active box: $DEP_BOX"
+echo "  subject active box:       $SUBJ_BOX"
 
-echo "▶ attest_audit on dependency (will be revoked)"
-DEP_AUDIT=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$DEP" "Dependency audit — no findings" "https://audits.example.com/dependency-v1.pdf" "$PUBDATE")
+echo "▶ attest_audit on dependency v1 (stays active; v2 left unaudited)"
+DEP_AUDIT=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$DEP_V1" "Dependency audit — no findings" "https://audits.example.com/dependency-v1.pdf" "$PUBDATE")
 echo "  $DEP_AUDIT"
 
 echo "▶ attest_audit_v2 on subject (score 95, the live signal)"
@@ -98,8 +100,7 @@ sui client ptb \
     --move-call "$AUDIT::audit_v2::attest_internal_note" "@$REGISTRY" "@$SUBJ" '"no Display registered"' \
     >/dev/null
 
-echo "▶ revoke the dependency audit and the subject's v1 audit"
-bash "$OPS/revoke-audit.sh" "$AUDIT" "$CAP" "$DEP_BOX" "$DEP_AUDIT"
+echo "▶ revoke the subject's v1 audit (the dependency v1 audit stays active)"
 bash "$OPS/revoke-audit.sh" "$AUDIT" "$CAP" "$SUBJ_BOX" "$SUBJ_AUDIT_V1"
 
 # Hand-off for the MVR Postgres seeder. All values are object ids, so a plain
@@ -111,8 +112,12 @@ cat > "$DEMO_IDS" <<EOF
   "attestationRegistryPkg": "$REGPKG",
   "subjects": {
     "subject": "$SUBJ",
-    "dependency": "$DEP"
+    "dependency": "$DEP_V1"
   },
+  "dependencyVersions": [
+    { "version": 1, "address": "$DEP_V1" },
+    { "version": 2, "address": "$DEP_V2" }
+  ],
   "trustedAttestors": [
     {
       "name": "auditor_a",
