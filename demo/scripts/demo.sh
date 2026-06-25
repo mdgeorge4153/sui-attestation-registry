@@ -39,7 +39,7 @@ for block in open(pubfile).read().split('[[published]]'):
 PY
 }
 
-REGPKG=$(parse_pkg_field attestation_registry published-at)
+REGPKG=$(parse_pkg_field attestations published-at)
 AUDIT=$(parse_pkg_field auditor_a published-at)      # v2/latest id (has audit + audit_v2)
 AUDIT_ORIG=$(parse_pkg_field auditor_a original-id)  # v1 id — defines Audit + AuditAdminCap
 DEP=$(parse_pkg_field dependency_example published-at)

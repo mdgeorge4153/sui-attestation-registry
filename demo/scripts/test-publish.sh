@@ -5,7 +5,7 @@
 # demo can render attestations.
 #
 # Packages (publish order matters — deps before dependents):
-#   packages/attestation_registry  -> shared Registry singleton (created in init)
+#   packages/attestations  -> shared Registry singleton (created in init)
 #   demo/auditor_a         -> Audit schema (later upgraded to add AuditV2)
 #   demo/auditor_b             -> a second auditor (Auditor B), NOT in the trusted set
 #   demo/dependency_example        -> a subject, and a dependency of subject_example
@@ -91,7 +91,7 @@ for block in content.split('[[published]]'):
 PY
 }
 
-for pkg in packages/attestation_registry demo/auditor_a demo/auditor_b demo/dependency_example demo/subject_example; do
+for pkg in packages/attestations demo/auditor_a demo/auditor_b demo/dependency_example demo/subject_example; do
     name=$(basename "$pkg")
     echo
     echo "▶ test-publish $name"
@@ -105,7 +105,7 @@ for pkg in packages/attestation_registry demo/auditor_a demo/auditor_b demo/depe
         exit 1
     fi
     echo "  ok"
-    if [[ "$name" == "attestation_registry" ]]; then
+    if [[ "$name" == "attestations" ]]; then
         json=$(extract_json "$json_out" || true)
         if [[ -n "$json" ]]; then
             REGISTRY_ID=$(python3 -c "
@@ -113,7 +113,7 @@ import json, sys
 r = json.loads(sys.stdin.read())
 for c in r.get('objectChanges', []):
     t = c.get('objectType', '')
-    if t.endswith('::attestation_registry::Registry') and c.get('type') == 'created':
+    if t.endswith('::attestations::Registry') and c.get('type') == 'created':
         print(c['objectId']); break
 " <<<"$json")
         fi
@@ -200,6 +200,6 @@ if [[ -n "$REGISTRY_ID" ]]; then
     echo "  REGISTRY_ID=$REGISTRY_ID bash demo/scripts/demo.sh"
 else
     echo
-    echo "(couldn't extract Registry id from attestation_registry's publish output;"
+    echo "(couldn't extract Registry id from the attestations package's publish output;"
     echo " look it up via the publish tx digest, then export it as REGISTRY_ID.)"
 fi

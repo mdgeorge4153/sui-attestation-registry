@@ -149,7 +149,7 @@ public struct UserAudit has store, drop {
 public fun attest_user_audit(
     registry: &Registry, subject: ID, score: u8, ctx: &mut TxContext,
 ): ID {
-    attestation_registry::attest<UserAudit>(
+    attestations::attest<UserAudit>(
         registry,
         subject,
         UserAudit { score, sender: ctx.sender() },

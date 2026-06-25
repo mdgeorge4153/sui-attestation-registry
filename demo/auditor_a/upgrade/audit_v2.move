@@ -14,7 +14,7 @@ use std::internal;
 use std::string::String;
 use sui::display_registry::{DisplayRegistry, Display, DisplayCap};
 use sui::transfer::Receiving;
-use attestation_registry::attestation_registry::{Registry, Box, Attestation};
+use attestations::attestations::{Registry, Box, Attestation};
 use auditor_a::audit::AuditAdminCap;
 
 /// V2 audit payload: keeps the numeric `score`, plus the description and

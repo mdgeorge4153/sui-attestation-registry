@@ -13,7 +13,7 @@ Display-field **conventions** rather than additional Move types.
 
 ```
 packages/
-  attestation_registry/       — the only deployable: Registry, Box, Attestation
+  attestations/       — the only deployable: Registry, Box, Attestation
 examples/                     — reusable schema patterns for third-party attesters
   auditor/                    — reference auditor schema: Audit { score: u8 }
 demo/                         — fixtures that exist only to drive the local demo (see demo/README.md)
@@ -62,7 +62,7 @@ Each Move package builds and tests independently. Run from the package's
 directory:
 
 ```bash
-cd packages/attestation_registry && sui move test
+cd packages/attestations && sui move test
 cd examples/auditor              && sui move test
 ```
 

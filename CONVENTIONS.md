@@ -1,6 +1,6 @@
 # Display Conventions
 
-`attestation_registry` keeps its core type minimal — `Attestation<T>` has a
+`attestations` keeps its core type minimal — `Attestation<T>` has a
 `subject` and `data: T`. Cross-cutting behaviors that schemas might want (a
 report's publication date, etc.) are expressed as **Display field conventions**
 rather than additional Move types. Off-chain consumers (wallets, explorers, apps)

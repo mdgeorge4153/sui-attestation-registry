@@ -161,7 +161,7 @@ public struct Revoked<phantom T> has copy, drop { subject: ID }
 
 - `phantom T` makes the event's fully-qualified Move type the filterable
   surface: subscribers filter by
-  `eventType: "0xPKG::attestation_registry::Attested<0xAUD::audit::Audit>"`
+  `eventType: "0xPKG::attestations::Attested<0xAUD::audit::Audit>"`
   directly, with no string parsing.
 - `subject` is the only field; everything else is recoverable from `tx.effects`
   or the attestation object. Denormalizing (attester, id, revoker) onto events

@@ -1,4 +1,4 @@
-module attestation_registry::attestation_registry;
+module attestations::attestations;
 
 use std::internal::{Self, Permit};
 use std::string::String;

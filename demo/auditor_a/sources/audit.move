@@ -4,7 +4,7 @@ use std::internal;
 use std::string::String;
 use sui::display_registry::DisplayRegistry;
 use sui::transfer::Receiving;
-use attestation_registry::attestation_registry::{Registry, Box, Attestation};
+use attestations::attestations::{Registry, Box, Attestation};
 
 /// Audit attestation payload. Defined here so auditor is the
 /// `Permit<Audit>` minting authority and the recorded attester for every

@@ -1,10 +1,10 @@
 #[test_only]
-module attestation_registry::attestation_registry_tests;
+module attestations::attestations_tests;
 
 use std::unit_test::assert_eq;
 use sui::test_scenario;
 use sui::transfer::Receiving;
-use attestation_registry::attestation_registry::{
+use attestations::attestations::{
     Self,
     Registry,
     Box,
@@ -30,7 +30,7 @@ fun permit(): std::internal::Permit<TestSchema> { std::internal::permit<TestSche
 /// a fresh tx.
 fun setup_with_box(subject: ID): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
+    attestations::init_for_testing(scenario.ctx());
 
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
@@ -50,7 +50,7 @@ fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
 fun create_box_aborts_on_duplicate() {
     let subject = subject_for(@0xDEAD);
     let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
+    attestations::init_for_testing(scenario.ctx());
 
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
@@ -115,7 +115,7 @@ fun reissuance_succeeds() {
 fun attest_before_create_box() {
     let subject = subject_for(@0xBEEF);
     let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
+    attestations::init_for_testing(scenario.ctx());
 
     // Attest with NO box created yet.
     scenario.next_tx(ALICE);

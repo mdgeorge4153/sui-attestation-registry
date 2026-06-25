@@ -5,7 +5,7 @@ use std::string::String;
 use std::unit_test::assert_eq;
 use sui::test_scenario;
 use sui::transfer::Receiving;
-use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
+use attestations::attestations::{Self, Registry, Box, Attestation};
 use auditor::audit::{Self, Audit};
 
 const ALICE: address = @0xA11CE;
@@ -21,12 +21,12 @@ fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
 
 /// Verifies the cross-package attest flow: `auditor::attest_audit` produces an
 /// accessible attestation, and `attester_of<Audit>` returns auditor's package
-/// address — distinct from `attestation_registry`'s.
+/// address — distinct from `attestations`'s.
 #[test]
 fun attest_audit_cross_package() {
     let subject = subject_for(@0xDEAD);
     let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
+    attestations::init_for_testing(scenario.ctx());
 
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
@@ -48,9 +48,9 @@ fun attest_audit_cross_package() {
     box.put_back_for_testing(a);
 
     // attester_of<Audit> must resolve to auditor's package address, not
-    // attestation_registry's.
-    let audit_pkg = attestation_registry::attester_of<Audit>();
-    let registry_pkg = attestation_registry::attester_of<Registry>();
+    // attestations's.
+    let audit_pkg = attestations::attester_of<Audit>();
+    let registry_pkg = attestations::attester_of<Registry>();
     assert!(audit_pkg != registry_pkg);
 
     test_scenario::return_shared(box);
@@ -63,7 +63,7 @@ fun attest_audit_cross_package() {
 fun revoke_audit_with_admin_cap() {
     let subject = subject_for(@0xDEAD);
     let mut scenario = test_scenario::begin(ALICE);
-    attestation_registry::init_for_testing(scenario.ctx());
+    attestations::init_for_testing(scenario.ctx());
 
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
