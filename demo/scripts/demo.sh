@@ -6,9 +6,9 @@
 #
 # Scenario (mirrors the scenario in demo/README.md):
 #   - create boxes for the dependency and the subject (which depends on it)
-#   - audit the dependency (Audit, score 90; revoked at the end)
+#   - audit the dependency (Audit; revoked at the end)
 #   - audit the subject with AuditV2 (score 95; the live signal)
-#   - audit the subject with v1 Audit (score 88; revoked at the end)
+#   - audit the subject with v1 Audit (revoked at the end)
 #   - an Audit from Auditor B (a second, untrusted auditor identity) + an
 #     attest_internal_note on the subject (both filtered out by a trust consumer)
 #   - revoke the dependency audit and the subject's v1 audit
@@ -73,19 +73,19 @@ SUBJ_BOX=$(bash "$OPS/create-box.sh" "$REGPKG" "$REGISTRY" "$SUBJ")
 echo "  dependency active box: $DEP_BOX"
 echo "  subject active box:    $SUBJ_BOX"
 
-echo "▶ attest_audit on dependency (score 90, will be revoked)"
-DEP_AUDIT=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$DEP" 90 "https://audits.example.com/dependency-v1.pdf" "$PUBDATE")
+echo "▶ attest_audit on dependency (will be revoked)"
+DEP_AUDIT=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$DEP" "Dependency audit — no findings" "https://audits.example.com/dependency-v1.pdf" "$PUBDATE")
 echo "  $DEP_AUDIT"
 
 echo "▶ attest_audit_v2 on subject (score 95, the live signal)"
 SUBJ_AUDIT_V2=$(sui client ptb \
-    --move-call "$AUDIT::audit_v2::attest_audit_v2" "@$CAP" "@$REGISTRY" "@$SUBJ" 95 '"https://audits.example.com/subject-v1.pdf"' "$PUBDATE" \
+    --move-call "$AUDIT::audit_v2::attest_audit_v2" "@$CAP" "@$REGISTRY" "@$SUBJ" '"Subject audit (v2) — passed"' '"https://audits.example.com/subject-v1.pdf"' "$PUBDATE" 95 \
     --json \
   | jq -r '.objectChanges[] | select(.objectType | contains("::AuditV2>")) | .objectId')
 echo "  $SUBJ_AUDIT_V2"
 
-echo "▶ attest_audit on subject (score 88, will be revoked)"
-SUBJ_AUDIT_V1=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$SUBJ" 88 "https://audits.example.com/subject-v1.pdf" "$PUBDATE")
+echo "▶ attest_audit on subject (v1, will be revoked)"
+SUBJ_AUDIT_V1=$(bash "$OPS/attest-audit.sh" "$AUDIT" "$CAP" "$REGISTRY" "$SUBJ" "Subject audit (v1) — superseded" "https://audits.example.com/subject-v1.pdf" "$PUBDATE")
 echo "  $SUBJ_AUDIT_V1"
 
 echo "▶ Auditor B audit (untrusted identity) + attest_internal_note (both filtered out)"
@@ -93,7 +93,7 @@ echo "▶ Auditor B audit (untrusted identity) + attest_internal_note (both filt
 # config — its Audit is filtered out by *identity*, not by type. Its
 # AuditAdminCap is its own distinct type (auditor_b's id).
 AUDITOR_B_CAP=$(find_owned "$ADDR" "$AUDITOR_B::audit::AuditAdminCap")
-bash "$OPS/attest-audit.sh" "$AUDITOR_B" "$AUDITOR_B_CAP" "$REGISTRY" "$SUBJ" 50 "https://auditor-b.example/r.pdf" "$PUBDATE" >/dev/null
+bash "$OPS/attest-audit.sh" "$AUDITOR_B" "$AUDITOR_B_CAP" "$REGISTRY" "$SUBJ" "Auditor B review" "https://auditor-b.example/r.pdf" "$PUBDATE" >/dev/null
 sui client ptb \
     --move-call "$AUDIT::audit_v2::attest_internal_note" "@$REGISTRY" "@$SUBJ" '"no Display registered"' \
     >/dev/null

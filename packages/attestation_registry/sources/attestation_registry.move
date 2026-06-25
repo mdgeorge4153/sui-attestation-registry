@@ -1,6 +1,6 @@
 module attestation_registry::attestation_registry;
 
-use std::internal::Permit;
+use std::internal::{Self, Permit};
 use std::string::String;
 use std::type_name;
 use sui::derived_object;
@@ -114,8 +114,8 @@ public fun attester_of<T>(): address { type_name::original_id<T>() }
 /// otherwise recover since the object goes straight to the box.
 public fun attest<T: store>(
     registry: &Registry,
-    subject: ID,
     _: Permit<T>,
+    subject: ID,
     data: T,
     ctx: &mut TxContext,
 ): ID {
@@ -164,7 +164,7 @@ public fun revoke<T: store>(
 ///
 /// Template strings in `values` reference fields of `Attestation<T>`:
 /// - Top-level: `{subject}`, `{data}`
-/// - T's own fields are under `{data.<field>}` (e.g. `{data.score}`)
+/// - T's own fields are under `{data.<field>}` (e.g. `{data.description}`)
 ///
 /// Revocation is not a Display field — it's which box owns the attestation.
 /// Schemas adopting cross-cutting conventions (`expires_at`, etc. — see
@@ -172,14 +172,14 @@ public fun revoke<T: store>(
 public fun register_display<T: store>(
     registry: &Registry,
     display_registry: &mut DisplayRegistry,
+    _: Permit<T>,
     fields: vector<String>,
     values: vector<String>,
-    _: Permit<T>,
     ctx: &mut TxContext,
 ) {
     let (mut display, cap) = display_registry::new<Attestation<T>>(
         display_registry,
-        std::internal::permit<Attestation<T>>(),
+        internal::permit<Attestation<T>>(),
         ctx,
     );
     fields.zip_do!(values, |field, value| display.set(&cap, field, value));
@@ -200,10 +200,10 @@ public fun register_display<T: store>(
 public fun add_display_field<T: store>(
     registry: &mut Registry,
     display: &mut Display<Attestation<T>>,
+    _: Permit<T>,
     rcv: Receiving<DisplayCap<Attestation<T>>>,
     fields: vector<String>,
     values: vector<String>,
-    _: Permit<T>,
 ) {
     let cap = transfer::public_receive(&mut registry.id, rcv);
     fields.zip_do!(values, |field, value| {

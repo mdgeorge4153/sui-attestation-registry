@@ -115,7 +115,7 @@ permit, not a bare path to forge `Attestation<T>` from a stray `T` value.
 ## Revocation: `Permit<T>`-gated, policy in the schema
 
 ```move
-public fun attest<T: store>(registry: &Registry, subject: ID, _: Permit<T>, data, ctx): ID
+public fun attest<T: store>(registry: &Registry, _: Permit<T>, subject: ID, data, ctx): ID
 public fun revoke<T: store>(box: &mut Box, _: Permit<T>, rcv: Receiving<Attestation<T>>)
 ```
 

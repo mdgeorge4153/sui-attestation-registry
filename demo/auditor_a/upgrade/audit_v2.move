@@ -10,26 +10,32 @@
 /// original id should surface `Attestation<AuditV2>` too.
 module auditor_a::audit_v2;
 
+use std::internal;
 use std::string::String;
 use sui::display_registry::{DisplayRegistry, Display, DisplayCap};
 use sui::transfer::Receiving;
 use attestation_registry::attestation_registry::{Registry, Box, Attestation};
 use auditor_a::audit::AuditAdminCap;
 
-/// V2 audit payload: adds a report link.
+/// V2 audit payload: keeps the numeric `score`, plus the description and
+/// publish-date the reference schema carries.
 public struct AuditV2 has store, drop {
-    score: u8,
+    /// Human-readable summary of the audit, surfaced via the `description`
+    /// presentation field.
+    description: String,
     /// URL of the full audit report (surfaced via the `link` convention).
     report_url: String,
     /// Report publication date (ms since epoch), surfaced via the
     /// `publish_date` convention.
     publish_date_ms: u64,
+    /// Numeric audit score, surfaced via the custom `score` field.
+    score: u8,
 }
 
 /// One-shot setup: register the append-only `Display<Attestation<AuditV2>>`
-/// with the `link` and `publish_date` convention fields. The `methodology`
-/// field is added later via `add_audit_v2_methodology_display`, to exercise
-/// `add_display_field`.
+/// with the full presentation set plus the custom `score` field. The
+/// `methodology` field is added later via `add_audit_v2_methodology_display`,
+/// to exercise `add_display_field`.
 public fun register_audit_v2_display(
     registry: &Registry,
     display_registry: &mut DisplayRegistry,
@@ -37,19 +43,23 @@ public fun register_audit_v2_display(
 ) {
     registry.register_display(
         display_registry,
+        internal::permit<AuditV2>(),
         vector[
             b"name".to_string(),
             b"description".to_string(),
             b"link".to_string(),
+            b"image_url".to_string(),
             b"publish_date".to_string(),
+            b"score".to_string(),
         ],
         vector[
             b"Audit attestation (v2)".to_string(),
-            b"Score: {data.score}/100".to_string(),
+            b"{data.description}".to_string(),
             b"{data.report_url}".to_string(),
+            b"https://example.com/auditor-icon.svg".to_string(),
             b"{data.publish_date_ms:ts}".to_string(),
+            b"{data.score}/100".to_string(),
         ],
-        std::internal::permit<AuditV2>(),
         ctx,
     );
 }
@@ -66,10 +76,10 @@ public fun add_audit_v2_methodology_display(
 ) {
     registry.add_display_field(
         display,
+        internal::permit<AuditV2>(),
         rcv,
         vector[b"methodology".to_string()],
         vector[b"https://auditor-a.example/methodology".to_string()],
-        std::internal::permit<AuditV2>(),
     );
 }
 
@@ -79,15 +89,16 @@ public fun attest_audit_v2(
     _: &AuditAdminCap,
     registry: &Registry,
     subject: ID,
-    score: u8,
+    description: String,
     report_url: String,
     publish_date_ms: u64,
+    score: u8,
     ctx: &mut TxContext,
 ) {
     registry.attest(
+        internal::permit<AuditV2>(),
         subject,
-        std::internal::permit<AuditV2>(),
-        AuditV2 { score, report_url, publish_date_ms },
+        AuditV2 { description, report_url, publish_date_ms, score },
         ctx,
     );
 }
@@ -99,7 +110,7 @@ public fun revoke_audit_v2(
     box: &mut Box,
     rcv: Receiving<Attestation<AuditV2>>,
 ) {
-    box.revoke(std::internal::permit<AuditV2>(), rcv);
+    box.revoke(internal::permit<AuditV2>(), rcv);
 }
 
 /// The numeric audit score.
@@ -123,8 +134,8 @@ public struct InternalNote has store, drop {
 /// Unrevocable — this schema exposes no revoke wrapper (negative test data).
 public fun attest_internal_note(registry: &Registry, subject: ID, text: String, ctx: &mut TxContext) {
     registry.attest(
+        internal::permit<InternalNote>(),
         subject,
-        std::internal::permit<InternalNote>(),
         InternalNote { text },
         ctx,
     );

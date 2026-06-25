@@ -35,10 +35,10 @@ a consumer surfaces one and ignores the other purely by package address.
 
 | Subject | Attestation | Status |
 |---|---|---|
-| `@demo/dependency` | Audit (score 90) | **Revoked** |
+| `@demo/dependency` | Audit (no findings) | **Revoked** |
 | `@demo/subject` | AuditV2 (score 95) | **Active** |
-| `@demo/subject` | Audit (score 88, v1) | **Revoked** |
-| `@demo/subject` | Audit (Auditor B, score 50) | **Active** |
+| `@demo/subject` | Audit (v1, superseded) | **Revoked** |
+| `@demo/subject` | Audit (Auditor B) | **Active** |
 | `@demo/subject` | InternalNote | **Active** |
 
 Every attestation is issued by `auditor_a` except the Auditor B one.

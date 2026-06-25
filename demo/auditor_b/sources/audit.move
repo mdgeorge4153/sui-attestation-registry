@@ -1,5 +1,6 @@
 module auditor_b::audit;
 
+use std::internal;
 use std::string::String;
 use sui::display_registry::DisplayRegistry;
 use sui::transfer::Receiving;
@@ -9,7 +10,9 @@ use attestation_registry::attestation_registry::{Registry, Box, Attestation};
 /// `Permit<Audit>` minting authority and the recorded attester for every
 /// `Attestation<Audit>` is auditor's published address.
 public struct Audit has store, drop {
-    score: u8,
+    /// Human-readable summary of the audit, surfaced via the `description`
+    /// presentation field.
+    description: String,
     /// URL of the full audit report (surfaced via the `link` convention).
     report_url: String,
     /// Report publication date (ms since epoch), surfaced via the
@@ -31,7 +34,8 @@ fun init(ctx: &mut TxContext) {
     transfer::transfer(AuditAdminCap { id: object::new(ctx) }, ctx.sender());
 }
 
-/// One-shot setup: register the append-only `Display<Attestation<Audit>>`.
+/// One-shot setup: register the append-only `Display<Attestation<Audit>>` with
+/// the full presentation set (name, description, link, image, publish date).
 /// Should be called once shortly after publish; aborts on second call
 /// (V2 enforcement via `display_registry`).
 public fun register_audit_display(
@@ -41,19 +45,21 @@ public fun register_audit_display(
 ) {
     registry.register_display(
         display_registry,
+        internal::permit<Audit>(),
         vector[
             b"name".to_string(),
             b"description".to_string(),
             b"link".to_string(),
+            b"image_url".to_string(),
             b"publish_date".to_string(),
         ],
         vector[
             b"Audit attestation".to_string(),
-            b"Score: {data.score}/100".to_string(),
+            b"{data.description}".to_string(),
             b"{data.report_url}".to_string(),
+            b"https://example.com/auditor-icon.svg".to_string(),
             b"{data.publish_date_ms:ts}".to_string(),
         ],
-        std::internal::permit<Audit>(),
         ctx,
     );
 }
@@ -65,15 +71,15 @@ public fun attest_audit(
     _: &AuditAdminCap,
     registry: &Registry,
     subject: ID,
-    score: u8,
+    description: String,
     report_url: String,
     publish_date_ms: u64,
     ctx: &mut TxContext,
 ) {
     registry.attest(
+        internal::permit<Audit>(),
         subject,
-        std::internal::permit<Audit>(),
-        Audit { score, report_url, publish_date_ms },
+        Audit { description, report_url, publish_date_ms },
         ctx,
     );
 }
@@ -85,11 +91,8 @@ public fun revoke_audit(
     box: &mut Box,
     rcv: Receiving<Attestation<Audit>>,
 ) {
-    box.revoke(std::internal::permit<Audit>(), rcv);
+    box.revoke(internal::permit<Audit>(), rcv);
 }
-
-/// The numeric audit score.
-public fun score(self: &Audit): u8 { self.score }
 
 #[test_only]
 public fun new_admin_cap_for_testing(ctx: &mut TxContext): AuditAdminCap {

@@ -7,7 +7,9 @@ it to stand up your own auditor identity — the demo does exactly that
 
 ## The schema
 
-- **`Audit`** — a completed review: a score out of 100 and a link to the report.
+- **`Audit`** — a completed review: a human-readable description, a link to the
+  full report, and the report's publication date. (The demo's `AuditV2` upgrade
+  adds a numeric score on top of these.)
 - **`AuditAdminCap`** — the single authority that may issue or revoke this
   auditor's attestations (minted at publish, sent to the publisher). This is one
   authority-policy choice; the base registry prescribes none.
