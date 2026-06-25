@@ -13,8 +13,8 @@ const EBoxAlreadyExists: vector<u8> =
     b"Boxes already exist for this subject";
 
 #[error(code = 1)]
-const EBoxRevoked: vector<u8> =
-    b"Pass the subject's active Box, not its revoked one";
+const ERevokeFromWrongBox: vector<u8> =
+    b"Pass the subject's active Box to revoke, not its revoked one";
 
 #[error(code = 2)]
 const EFieldExists: vector<u8> =
@@ -75,24 +75,12 @@ public struct Revoked<phantom T> has copy, drop {
 
 // === Setup ===
 
-/// Create the `Registry` singleton at publish time.
-fun init(ctx: &mut TxContext) {
-    transfer::share_object(Registry { id: object::new(ctx) });
-}
-
 /// Create and share a subject's two `Box`es (active + revoked). Aborts
 /// `EBoxAlreadyExists` if they already exist.
 public fun create_box(registry: &mut Registry, subject: ID) {
     let registry_id = object::id(registry);
-    claim_box(registry, registry_id, BoxKey { subject, revoked: false });
-    claim_box(registry, registry_id, BoxKey { subject, revoked: true });
-}
-
-/// Claim and share one box for `key`.
-fun claim_box(registry: &mut Registry, registry_id: ID, key: BoxKey) {
-    assert!(!derived_object::exists(&registry.id, key), EBoxAlreadyExists);
-    let id = derived_object::claim(&mut registry.id, key);
-    transfer::share_object(Box { id, key, registry: registry_id });
+    registry.claim_box(registry_id, BoxKey { subject, revoked: false });
+    registry.claim_box(registry_id, BoxKey { subject, revoked: true });
 }
 
 // === Accessors ===
@@ -109,15 +97,6 @@ public fun box_subject(box: &Box): ID { box.key.subject }
 /// Whether `box` is the subject's revoked box. An attestation's status is
 /// `is_revoked` of the box that owns it.
 public fun is_revoked(box: &Box): bool { box.key.revoked }
-
-/// Test-only: address of a subject's active (`revoked == false`) or revoked
-/// (`revoked == true`) box. Tests use it to locate the two boxes; production
-/// callers don't need it (off-chain consumers derive box addresses themselves,
-/// and `BoxKey` is module-private so there's nothing to expose on-chain).
-#[test_only]
-public fun box_address(registry: &Registry, subject: ID, revoked: bool): address {
-    derived_object::derive_address(object::id(registry), BoxKey { subject, revoked })
-}
 
 /// Original-publish address of `T`'s defining package. Useful for on-chain
 /// trust-list checks (e.g.
@@ -164,7 +143,7 @@ public fun revoke<T: store>(
     _: Permit<T>,
     rcv: Receiving<Attestation<T>>,
 ) {
-    assert!(!box.key.revoked, EBoxRevoked);
+    assert!(!box.key.revoked, ERevokeFromWrongBox);
     let a = transfer::receive(&mut box.id, rcv);
     let subject = a.subject;
     let revoked_box = derived_object::derive_address(
@@ -204,7 +183,7 @@ public fun register_display<T: store>(
         ctx,
     );
     fields.zip_do!(values, |field, value| display.set(&cap, field, value));
-    display_registry::share(display);
+    display.share();
 
     // Park the `DisplayCap` on the Registry. It's kept (not destroyed) so the
     // schema can later append fields via `add_display_field`, which receives
@@ -234,7 +213,30 @@ public fun add_display_field<T: store>(
     transfer::public_transfer(cap, object::id(registry).to_address());
 }
 
+// === Internal ===
+
+/// Create the `Registry` singleton at publish time.
+fun init(ctx: &mut TxContext) {
+    transfer::share_object(Registry { id: object::new(ctx) });
+}
+
+/// Claim and share one box for `key`.
+fun claim_box(registry: &mut Registry, registry_id: ID, key: BoxKey) {
+    assert!(!derived_object::exists(&registry.id, key), EBoxAlreadyExists);
+    let id = derived_object::claim(&mut registry.id, key);
+    transfer::share_object(Box { id, key, registry: registry_id });
+}
+
 // === Test seam ===
+
+/// Address of a subject's active (`revoked == false`) or revoked
+/// (`revoked == true`) box. Tests use it to locate the two boxes; production
+/// callers don't need it (off-chain consumers derive box addresses themselves,
+/// and `BoxKey` is module-private so there's nothing to expose on-chain).
+#[test_only]
+public fun box_address(registry: &Registry, subject: ID, revoked: bool): address {
+    derived_object::derive_address(object::id(registry), BoxKey { subject, revoked })
+}
 
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {

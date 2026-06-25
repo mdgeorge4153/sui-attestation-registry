@@ -9,6 +9,7 @@ use attestation_registry::attestation_registry::{
     Box,
     Attestation,
     EBoxAlreadyExists,
+    ERevokeFromWrongBox,
 };
 
 const ALICE: address = @0xA11CE;
@@ -32,7 +33,7 @@ fun setup_with_box(subject: ID): test_scenario::Scenario {
 
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
-    attestation_registry::create_box(&mut registry, subject);
+    registry.create_box(subject);
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
@@ -41,9 +42,7 @@ fun setup_with_box(subject: ID): test_scenario::Scenario {
 
 /// The object id of `subject`'s active or revoked box.
 fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
-    object::id_from_address(
-        attestation_registry::box_address(registry, subject, revoked),
-    )
+    object::id_from_address(registry.box_address(subject, revoked))
 }
 
 #[test, expected_failure(abort_code = EBoxAlreadyExists)]
@@ -54,8 +53,8 @@ fun test_create_box_aborts_on_duplicate() {
 
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
-    attestation_registry::create_box(&mut registry, subject);
-    attestation_registry::create_box(&mut registry, subject);
+    registry.create_box(subject);
+    registry.create_box(subject);
     test_scenario::return_shared(registry);
     scenario.end();
 }
@@ -67,9 +66,7 @@ fun test_attest_and_read() {
 
     let registry: Registry = scenario.take_shared();
     let active = box_id(&registry, subject, false);
-    attestation_registry::attest<TestSchema>(
-        &registry, subject, permit(), TestSchema { tag: 42 }, scenario.ctx(),
-    );
+    registry.attest(subject, permit(), TestSchema { tag: 42 }, scenario.ctx());
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
@@ -80,10 +77,10 @@ fun test_attest_and_read() {
     assert!(ids.length() == 1, 0);
     let rcv: Receiving<Attestation<TestSchema>> =
         test_scenario::receiving_ticket_by_id(ids[0]);
-    let a = attestation_registry::borrow_for_testing<TestSchema>(&mut box, rcv);
+    let a = box.borrow_for_testing(rcv);
     assert!(a.subject() == subject, 1);
     assert!(a.data().tag == 42, 2);
-    attestation_registry::put_back_for_testing(&mut box, a);
+    box.put_back_for_testing(a);
     test_scenario::return_shared(box);
     scenario.end();
 }
@@ -95,8 +92,8 @@ fun test_reissuance_succeeds() {
 
     let registry: Registry = scenario.take_shared();
     let active = box_id(&registry, subject, false);
-    attestation_registry::attest<TestSchema>(&registry, subject, permit(), TestSchema { tag: 1 }, scenario.ctx());
-    attestation_registry::attest<TestSchema>(&registry, subject, permit(), TestSchema { tag: 2 }, scenario.ctx());
+    registry.attest(subject, permit(), TestSchema { tag: 1 }, scenario.ctx());
+    registry.attest(subject, permit(), TestSchema { tag: 2 }, scenario.ctx());
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
@@ -122,9 +119,9 @@ fun test_attest_before_create_box() {
     // Attest with NO box created yet.
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
-    attestation_registry::attest<TestSchema>(&registry, subject, permit(), TestSchema { tag: 9 }, scenario.ctx());
+    registry.attest(subject, permit(), TestSchema { tag: 9 }, scenario.ctx());
     // Now create the box at the (already-populated) active address.
-    attestation_registry::create_box(&mut registry, subject);
+    registry.create_box(subject);
     let active = box_id(&registry, subject, false);
     test_scenario::return_shared(registry);
 
@@ -148,7 +145,7 @@ fun test_revoke_moves_to_revoked_box() {
     let registry: Registry = scenario.take_shared();
     let active = box_id(&registry, subject, false);
     let revoked = box_id(&registry, subject, true);
-    attestation_registry::attest<TestSchema>(&registry, subject, permit(), TestSchema { tag: 7 }, scenario.ctx());
+    registry.attest(subject, permit(), TestSchema { tag: 7 }, scenario.ctx());
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
@@ -164,7 +161,7 @@ fun test_revoke_moves_to_revoked_box() {
     scenario.next_tx(ALICE);
     let mut active_box: Box = scenario.take_shared_by_id(active);
     let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(att_id);
-    attestation_registry::revoke<TestSchema>(&mut active_box, permit(), rcv);
+    active_box.revoke(permit(), rcv);
     test_scenario::return_shared(active_box);
 
     // Active box empty; the revoked box now owns the attestation.
@@ -186,6 +183,35 @@ fun test_revoke_moves_to_revoked_box() {
     assert!(revoked_ids[0] == att_id, 2);
     test_scenario::return_shared(revoked_box);
 
+    scenario.end();
+}
+
+/// `revoke` must be handed the subject's *active* box; passing the revoked box
+/// aborts `ERevokeFromWrongBox` (the guard fires before any receive).
+#[test, expected_failure(abort_code = ERevokeFromWrongBox)]
+fun test_revoke_from_wrong_box_aborts() {
+    let subject = subject_for(@0xDEAD);
+    let mut scenario = setup_with_box(subject);
+
+    let registry: Registry = scenario.take_shared();
+    let active = box_id(&registry, subject, false);
+    let revoked = box_id(&registry, subject, true);
+    registry.attest(subject, permit(), TestSchema { tag: 5 }, scenario.ctx());
+    test_scenario::return_shared(registry);
+
+    scenario.next_tx(ALICE);
+    let box: Box = scenario.take_shared_by_id(active);
+    let att_id = test_scenario::receivable_object_ids_for_owner_id<Attestation<TestSchema>>(
+        object::id(&box),
+    )[0];
+    test_scenario::return_shared(box);
+
+    // Hand `revoke` the REVOKED box instead of the active one → aborts.
+    scenario.next_tx(ALICE);
+    let mut revoked_box: Box = scenario.take_shared_by_id(revoked);
+    let rcv: Receiving<Attestation<TestSchema>> = test_scenario::receiving_ticket_by_id(att_id);
+    revoked_box.revoke(permit(), rcv);
+    test_scenario::return_shared(revoked_box);
     scenario.end();
 }
 

@@ -14,9 +14,7 @@ fun report_url(): String { b"https://audits.example.com/r.pdf".to_string() }
 fun publish_date(): u64 { 1_700_000_000_000 }
 
 fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
-    object::id_from_address(
-        attestation_registry::box_address(registry, subject, revoked),
-    )
+    object::id_from_address(registry.box_address(subject, revoked))
 }
 
 /// Verifies the cross-package attest flow: `auditor::attest_audit` produces an
@@ -30,10 +28,10 @@ fun test_attest_audit_cross_package() {
 
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
-    attestation_registry::create_box(&mut registry, subject);
+    registry.create_box(subject);
     let active = box_id(&registry, subject, false);
     let admin = audit::new_admin_cap_for_testing(scenario.ctx());
-    audit::attest_audit(&admin, &registry, subject, 9, report_url(), publish_date(), scenario.ctx());
+    admin.attest_audit(&registry, subject, 9, report_url(), publish_date(), scenario.ctx());
     transfer::public_transfer(admin, ALICE);
     test_scenario::return_shared(registry);
 
@@ -43,10 +41,10 @@ fun test_attest_audit_cross_package() {
         object::id(&box),
     );
     let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(ids[0]);
-    let a = attestation_registry::borrow_for_testing<Audit>(&mut box, rcv);
+    let a = box.borrow_for_testing(rcv);
     assert!(a.subject() == subject, 0);
     assert!(a.data().score() == 9, 1);
-    attestation_registry::put_back_for_testing(&mut box, a);
+    box.put_back_for_testing(a);
 
     // attester_of<Audit> must resolve to auditor's package address, not
     // attestation_registry's.
@@ -68,11 +66,11 @@ fun test_revoke_audit_with_admin_cap() {
 
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
-    attestation_registry::create_box(&mut registry, subject);
+    registry.create_box(subject);
     let active = box_id(&registry, subject, false);
     let revoked = box_id(&registry, subject, true);
     let admin = audit::new_admin_cap_for_testing(scenario.ctx());
-    audit::attest_audit(&admin, &registry, subject, 9, report_url(), publish_date(), scenario.ctx());
+    admin.attest_audit(&registry, subject, 9, report_url(), publish_date(), scenario.ctx());
     test_scenario::return_shared(registry);
 
     scenario.next_tx(ALICE);
@@ -86,7 +84,7 @@ fun test_revoke_audit_with_admin_cap() {
     scenario.next_tx(ALICE);
     let mut active_box: Box = scenario.take_shared_by_id(active);
     let rcv: Receiving<Attestation<Audit>> = test_scenario::receiving_ticket_by_id(id);
-    audit::revoke_audit(&admin, &mut active_box, rcv);
+    admin.revoke_audit(&mut active_box, rcv);
     transfer::public_transfer(admin, ALICE);
     test_scenario::return_shared(active_box);
 

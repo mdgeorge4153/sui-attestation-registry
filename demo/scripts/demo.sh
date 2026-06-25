@@ -80,7 +80,7 @@ echo "  $DEP_AUDIT"
 echo "▶ attest_audit_v2 on subject (score 95, the live signal)"
 SUBJ_AUDIT_V2=$(sui client ptb \
     --move-call "$AUDIT::audit_v2::attest_audit_v2" "@$CAP" "@$REGISTRY" "@$SUBJ" 95 '"https://audits.example.com/subject-v1.pdf"' "$PUBDATE" \
-    --gas-budget 100000000 --json \
+    --json \
   | jq -r '.objectChanges[] | select(.objectType | contains("::AuditV2>")) | .objectId')
 echo "  $SUBJ_AUDIT_V2"
 
@@ -96,7 +96,7 @@ AUDITOR_B_CAP=$(find_owned "$ADDR" "$AUDITOR_B::audit::AuditAdminCap")
 bash "$OPS/attest-audit.sh" "$AUDITOR_B" "$AUDITOR_B_CAP" "$REGISTRY" "$SUBJ" 50 "https://auditor-b.example/r.pdf" "$PUBDATE" >/dev/null
 sui client ptb \
     --move-call "$AUDIT::audit_v2::attest_internal_note" "@$REGISTRY" "@$SUBJ" '"no Display registered"' \
-    --gas-budget 100000000 >/dev/null
+    >/dev/null
 
 echo "▶ revoke the dependency audit and the subject's v1 audit"
 bash "$OPS/revoke-audit.sh" "$AUDIT" "$CAP" "$DEP_BOX" "$DEP_AUDIT"

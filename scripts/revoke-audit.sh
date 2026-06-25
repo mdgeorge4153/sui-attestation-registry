@@ -9,4 +9,4 @@ AUDITPKG=$1; CAP=$2; BOX=$3; ATTESTATION=$4
 
 sui client ptb \
     --move-call "$AUDITPKG::audit::revoke_audit" "@$CAP" "@$BOX" "@$ATTESTATION" \
-    --gas-budget 100000000 >/dev/null
+    >/dev/null

@@ -13,7 +13,7 @@ module auditor_a::audit_v2;
 use std::string::String;
 use sui::display_registry::{DisplayRegistry, Display, DisplayCap};
 use sui::transfer::Receiving;
-use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
+use attestation_registry::attestation_registry::{Registry, Box, Attestation};
 use auditor_a::audit::AuditAdminCap;
 
 /// V2 audit payload: adds a report link.
@@ -35,8 +35,7 @@ public fun register_audit_v2_display(
     display_registry: &mut DisplayRegistry,
     ctx: &mut TxContext,
 ) {
-    attestation_registry::register_display<AuditV2>(
-        registry,
+    registry.register_display(
         display_registry,
         vector[
             b"name".to_string(),
@@ -65,8 +64,7 @@ public fun add_audit_v2_methodology_display(
     display: &mut Display<Attestation<AuditV2>>,
     rcv: Receiving<DisplayCap<Attestation<AuditV2>>>,
 ) {
-    attestation_registry::add_display_field(
-        registry,
+    registry.add_display_field(
         display,
         rcv,
         vector[b"methodology".to_string()],
@@ -86,8 +84,7 @@ public fun attest_audit_v2(
     publish_date_ms: u64,
     ctx: &mut TxContext,
 ) {
-    attestation_registry::attest<AuditV2>(
-        registry,
+    registry.attest(
         subject,
         std::internal::permit<AuditV2>(),
         AuditV2 { score, report_url, publish_date_ms },
@@ -102,7 +99,7 @@ public fun revoke_audit_v2(
     box: &mut Box,
     rcv: Receiving<Attestation<AuditV2>>,
 ) {
-    attestation_registry::revoke<AuditV2>(box, std::internal::permit<AuditV2>(), rcv);
+    box.revoke(std::internal::permit<AuditV2>(), rcv);
 }
 
 /// The numeric audit score.
@@ -125,8 +122,7 @@ public struct InternalNote has store, drop {
 /// `Attestation<InternalNote>`, so Display-gating consumers ignore it.
 /// Unrevocable — this schema exposes no revoke wrapper (negative test data).
 public fun attest_internal_note(registry: &Registry, subject: ID, text: String, ctx: &mut TxContext) {
-    attestation_registry::attest<InternalNote>(
-        registry,
+    registry.attest(
         subject,
         std::internal::permit<InternalNote>(),
         InternalNote { text },

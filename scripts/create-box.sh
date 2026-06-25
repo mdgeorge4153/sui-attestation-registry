@@ -9,7 +9,7 @@ REGPKG=$1; REGISTRY=$2; SUBJECT=$3
 
 out=$(sui client ptb \
     --move-call "$REGPKG::attestation_registry::create_box" "@$REGISTRY" "@$SUBJECT" \
-    --gas-budget 100000000 --json)
+    --json)
 
 # create_box makes two boxes; echo the active one (BoxKey.revoked == false).
 for box in $(echo "$out" | jq -r '.objectChanges[] | select(.objectType | endswith("::Box")) | .objectId'); do

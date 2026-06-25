@@ -180,7 +180,7 @@ else
         V2_CAP=$(printf '%s' "$v2reg" | jq -r '.objectChanges[] | select(.objectType | test("display_registry::DisplayCap<.*AuditV2")) | .objectId')
         if "$SUI" client ptb \
                 --move-call "$PKG_AUDIT::audit_v2::add_audit_v2_methodology_display" "@$REGISTRY_ID" "@$V2_DISPLAY" "@$V2_CAP" \
-                --gas-budget "$GAS_BUDGET" >/dev/null 2>&1; then
+                >/dev/null 2>&1; then
             echo "  ok (+methodology)"
         else
             echo "  add_display_field FAILED"

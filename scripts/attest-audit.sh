@@ -9,5 +9,5 @@ AUDITPKG=$1; CAP=$2; REGISTRY=$3; SUBJECT=$4; SCORE=$5; URL=$6; PUBDATE=$7
 
 sui client ptb \
     --move-call "$AUDITPKG::audit::attest_audit" "@$CAP" "@$REGISTRY" "@$SUBJECT" "$SCORE" "\"$URL\"" "$PUBDATE" \
-    --gas-budget 100000000 --json \
+    --json \
   | jq -r '.objectChanges[] | select(.objectType | contains("::Attestation<")) | .objectId'

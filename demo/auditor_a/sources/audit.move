@@ -3,7 +3,7 @@ module auditor_a::audit;
 use std::string::String;
 use sui::display_registry::DisplayRegistry;
 use sui::transfer::Receiving;
-use attestation_registry::attestation_registry::{Self, Registry, Box, Attestation};
+use attestation_registry::attestation_registry::{Registry, Box, Attestation};
 
 /// Audit attestation payload. Defined here so auditor is the
 /// `Permit<Audit>` minting authority and the recorded attester for every
@@ -39,8 +39,7 @@ public fun register_audit_display(
     display_registry: &mut DisplayRegistry,
     ctx: &mut TxContext,
 ) {
-    attestation_registry::register_display<Audit>(
-        registry,
+    registry.register_display(
         display_registry,
         vector[
             b"name".to_string(),
@@ -71,8 +70,7 @@ public fun attest_audit(
     publish_date_ms: u64,
     ctx: &mut TxContext,
 ) {
-    attestation_registry::attest<Audit>(
-        registry,
+    registry.attest(
         subject,
         std::internal::permit<Audit>(),
         Audit { score, report_url, publish_date_ms },
@@ -87,7 +85,7 @@ public fun revoke_audit(
     box: &mut Box,
     rcv: Receiving<Attestation<Audit>>,
 ) {
-    attestation_registry::revoke<Audit>(box, std::internal::permit<Audit>(), rcv);
+    box.revoke(std::internal::permit<Audit>(), rcv);
 }
 
 /// The numeric audit score.
