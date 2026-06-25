@@ -1,70 +1,64 @@
 #!/usr/bin/env bash
 # Full single-command local demo:
-#   - kill any prior `sui start --with-faucet` localnet
-#   - start a fresh one
+#   - start a fresh localnet (fullnode + faucet + indexer Postgres + GraphQL),
+#     managed by demo/scripts/localnets.py so its Postgres is torn down too
 #   - test-publish all packages, upgrade auditor_a, register Displays
 #   - run the shell demo (demo/scripts/demo.sh)
-#   - kill the localnet on exit (success or failure)
+#   - stop the localnet *and its Postgres* on exit (success or failure)
+#
+# The localnet always runs the indexer + GraphQL (:9125): localnets.py owns the
+# Postgres it points the indexer at, so unlike a bare `sui start --with-graphql`
+# it leaves no orphaned Postgres behind. Requires python3 + local Postgres
+# tools (initdb/pg_ctl/createdb) on PATH.
 #
 # Usage:
 #   bash demo/scripts/run-demo.sh                  # default `sui` on PATH
 #   SUI=/path/to/sui bash demo/scripts/run-demo.sh # override the sui binary
-#   WITH_GRAPHQL=1 bash demo/scripts/run-demo.sh   # also start GraphQL (:9125),
-#                                                  # for the MVR integration
-#                                                  # (requires a local Postgres;
-#                                                  # the demo itself uses gRPC).
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SUI="${SUI:-sui}"
+LOCALNETS_PY="$(dirname "$0")/localnets.py"
 LOCALNET_LOG="/tmp/sui-localnet-$$.log"
+# localnets.py writes its postgres/ data dir and <name>.json pidfile into the
+# cwd, so give it a private scratch dir (not the repo).
+RUN_DIR="$(mktemp -d "/tmp/attest-demo-XXXXXX")"
+READY_FILE="$RUN_DIR/ready"
+
+PG_PORT=5433       # demo-private Postgres (avoids a system :5432)
+FAUCET_PORT=9123
+NETWORK="localnet,9000,9124,9125"   # NAME,FULLNODE,CONSISTENT,GRAPHQL
 
 LOCAL_PID=""
 cleanup() {
     if [[ -n "$LOCAL_PID" ]]; then
         echo
-        echo "▶ stopping localnet (PID $LOCAL_PID)"
+        echo "▶ stopping localnet + Postgres (PID $LOCAL_PID)"
+        # SIGTERM triggers localnets.py's handler: terminate the localnet, then
+        # pg_stop the Postgres it started.
         kill "$LOCAL_PID" 2>/dev/null || true
         wait "$LOCAL_PID" 2>/dev/null || true
     fi
+    rm -rf "$RUN_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-# Kill any other lingering `sui start --with-faucet` from a prior run.
-# Match against the binary path + the --with-faucet flag to avoid stomping
-# on unrelated sui processes (sui-fork, indexers, etc.).
-if pgrep -f 'sui start .*--with-faucet' >/dev/null; then
-    echo "▶ killing prior localnet"
-    pkill -f 'sui start .*--with-faucet' || true
-    sleep 1
-fi
-
-GRAPHQL_FLAG=()
-WAIT_PORTS="9000 9123"
-if [[ -n "${WITH_GRAPHQL:-}" ]]; then
-    GRAPHQL_FLAG=(--with-graphql)
-    WAIT_PORTS="9000 9123 9125"
-fi
-
 echo "▶ starting localnet (log: $LOCALNET_LOG)"
-# `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty, which
-# avoids an "unbound variable" error from `set -u` on bash 3.2 (macOS).
-"$SUI" start --force-regenesis --with-faucet ${GRAPHQL_FLAG[@]+"${GRAPHQL_FLAG[@]}"} > "$LOCALNET_LOG" 2>&1 &
+# localnets.py invokes `sui` from PATH; prepend the chosen SUI's dir so a
+# `SUI=/path/to/sui` override is honored. It writes postgres/ + <name>.json
+# into its cwd, so run it from the private scratch dir.
+( cd "$RUN_DIR" && PATH="$(dirname "$SUI"):$PATH" python3 "$REPO_ROOT/demo/scripts/localnets.py" \
+    serve --ready "$READY_FILE" --pg-port "$PG_PORT" --faucet-port "$FAUCET_PORT" \
+    --network "$NETWORK" ) > "$LOCALNET_LOG" 2>&1 &
 LOCAL_PID=$!
-# Wait for the JSON-RPC port (9000), the faucet port (9123), and — when
-# requested — the GraphQL port (9125).
-for port in $WAIT_PORTS; do
-    for _ in {1..60}; do
-        if nc -z 127.0.0.1 "$port" 2>/dev/null; then break; fi
-        sleep 0.5
-    done
-    if ! nc -z 127.0.0.1 "$port" 2>/dev/null; then
-        echo "localnet port $port didn't come up; tail of log:"
-        tail -20 "$LOCALNET_LOG"
-        exit 1
-    fi
-done
+
+echo "▶ waiting for localnet readiness"
+if ! python3 "$LOCALNETS_PY" ready "$READY_FILE"; then
+    echo "localnet failed to come up; tail of log:"
+    tail -30 "$LOCALNET_LOG"
+    exit 1
+fi
 
 echo "▶ switching sui client to local + faucet"
 "$SUI" client switch --env local >/dev/null
