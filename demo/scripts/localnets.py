@@ -208,12 +208,21 @@ def serve(args):
     signal.signal(signal.SIGINT, handle_signal)
 
     pg_root = Path("postgres")
+    # `sui start --force-regenesis` mkdtemp's its node dbs (authorities_db,
+    # consensus_db, full_node_db) under $TMPDIR and never removes them — across
+    # runs they accumulated to tens of GB. Redirect each localnet's $TMPDIR into
+    # this dir so teardown can sweep them with the rest of our scratch state.
+    sui_tmp_root = Path("sui-tmp")
 
     try:
         pg_start(pg_root, args.pg_port)
 
         for name, fullnode, consistent, graphql in args.network:
             pg_createdb(args.pg_port, name)
+            sui_tmp = sui_tmp_root / name
+            sui_tmp.mkdir(parents=True, exist_ok=True)
+            env = os.environ.copy()
+            env["TMPDIR"] = str(sui_tmp.resolve())
             child = subprocess.Popen(
                 [
                     *("sui", "start", "--force-regenesis", "--quiet"),
@@ -222,7 +231,8 @@ def serve(args):
                     f"--with-indexer=postgres://postgres@127.0.0.1:{args.pg_port}/{name}",
                     f"--with-consistent-store=127.0.0.1:{consistent}",
                     f"--with-graphql=127.0.0.1:{graphql}",
-                ]
+                ],
+                env=env,
             )
 
             Path(f"{name}.json").write_text(
@@ -283,6 +293,8 @@ def serve(args):
     finally:
         terminate_children()
         pg_stop(pg_root)
+        # Children are dead now, so their node-db temp dirs are free to remove.
+        shutil.rmtree(sui_tmp_root, ignore_errors=True)
 
 
 def port_closed(port):
