@@ -66,10 +66,6 @@ cd packages/attestations && sui move test
 cd examples/auditor              && sui move test
 ```
 
-You'll need a `sui` CLI new enough to support the `#[error(code = …)]`
-attribute and the `type_name::original_id` native helper — the testnet
-release line at the time of writing (`v1.73.0`) is sufficient.
-
 ## Running the demo
 
 The demo creates Boxes for two real subjects (`dependency_example` and the
