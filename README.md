@@ -1,8 +1,8 @@
 # Sui Attestation Registry PoC
 
-A Move primitive for typed, on-chain attestations about arbitrary subjects
-(packages, addresses, anything that has an `ID`), plus a shell CLI demo that
-exercises it.
+A Move primitive for typed, on-chain attestations (e.g. audits) about arbitrary
+subjects (packages, addresses, anything that has an `ID`), plus a shell CLI demo
+that exercises it.
 
 The design is **off-chain-primary**: attestations are stored under a
 deterministic, type-filterable on-chain layout that's cheap to enumerate from
@@ -15,7 +15,7 @@ Display-field **conventions** rather than additional Move types.
 packages/
   attestations/       — the only deployable: Registry, Box, Attestation
 examples/                     — reusable schema patterns for third-party attesters
-  auditor/                    — reference auditor schema: Audit { score: u8 }
+  auditor/                    — reference auditor schema (`Audit` + `AuditAdminCap`)
 demo/                         — fixtures that exist only to drive the local demo (see demo/README.md)
   auditor_a/                  — copy of examples/auditor + an AuditV2 upgrade; TRUSTED in the demo
   auditor_b/                  — a second copy; NOT trusted (the identity-based-trust demo)
@@ -27,7 +27,7 @@ CONVENTIONS.md                — Display-field conventions (expires_at, …)
 FUTURE-EXTENSIONS.md          — design memos for surfaces deliberately deferred from v0
 ```
 
-## Concepts in one paragraph
+## Concepts
 
 ```
 Registry (shared singleton)
@@ -43,9 +43,9 @@ server-side type filtering. Each `Attestation<T>` is owned by its Box via
 transfer-to-object.
 
 The key design feature is that **the schema package has complete control over
-its attestations.** Constructing the `T` in `Attestation<T>` is restricted by
-Move to `T`'s defining package, so only that package can `attest`, and only it
-can mint the `Permit<T>` that gates `revoke` and `register_display`. The
+its attestations.** `attest`, `revoke`, and `register_display` are all gated by
+`Permit<T>`, which Move lets only `T`'s defining package mint — so only that
+package can issue, revoke, or set the Display for `Attestation<T>`. The
 recorded attester is therefore `T`'s package — bound to the type at compile
 time, not denormalized into a field — and each schema defines its own revocation
 authority (an admin cap, a per-attestation bearer cap, or none at all).
@@ -68,8 +68,7 @@ cd examples/auditor              && sui move test
 
 You'll need a `sui` CLI new enough to support the `#[error(code = …)]`
 attribute and the `type_name::original_id` native helper — the testnet
-release line at the time of writing (`v1.73.0`) is sufficient. Install or
-update via `suiup install sui@testnet`.
+release line at the time of writing (`v1.73.0`) is sufficient.
 
 ## Running the demo
 

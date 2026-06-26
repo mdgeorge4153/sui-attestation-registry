@@ -41,8 +41,7 @@ Registry (shared singleton)
   └── BoxKey{subject, revoked:true}  → revoked Box → owns revoked Attestation<T> (TTO)
 ```
 
-- **`Registry`** is a `key`-only shared singleton, created in `init`; its UID is
-  the parent for all per-subject boxes.
+- **`Registry`** is a `key`-only shared singleton, created in `init`; all per-subject box addresses are derived from its UID.
 - **`Box`** is `key`-only and per-subject. `create_box` claims *both* boxes for
   a subject at once, and is idempotent (a no-op for boxes that already exist, so
   a revoker can always call it before `revoke`). Each box address
@@ -55,12 +54,10 @@ Registry (shared singleton)
   (`derive_address(registry, {subject, false})`) — `attest` needs no `Box`
   object, so the box can be created lazily; `revoke` moves it to the revoked box.
 
-The Box is a real object (not just a derived address) — needed by `revoke` and
-on-chain viewing, not by `attest` — because it stores its
-`BoxKey` so a viewer knows the subject and which box, the address is
-recomputable, and an attestation's status is readable on-chain as
-`is_revoked(owner)` — and its parent `registry: ID`, so `revoke` can derive the
-sibling box without `&Registry`. It also gives `transfer::receive` a `&mut UID`
+The Box is a real object (not just a derived address) — needed by `revoke`, not
+by `attest` — because it stores its `BoxKey` (so a viewer reading the object
+knows the subject and which box) and its parent `registry: ID`, so `revoke` can
+derive the sibling box without `&Registry`. It also gives `transfer::receive` a `&mut UID`
 to borrow at the address; without an object there, nothing could receive an
 attestation back. Earlier iterations encoded status as an on-chain `enum Status`
 and then an `active: bool` flag; both made every off-chain read pay a per-object
@@ -86,11 +83,7 @@ public struct Attestation<T: store> has key {
 }
 ```
 
-`key`-only (no `store`, `drop`, or `copy`), and no public function returns one by
-value — so external callers can't obtain one, and even with one in hand
-`public_transfer` needs `store`, Move forbids wrapping a `key` object, and no
-`drop` means it can't be discarded. The only legal disposition is `revoke`
-(active box → revoked box). Bytecode-enforced; no discipline note required.
+Once created, an Attestation is never destroyed, and it is always owned by a box - either the active or revoked box for its `subject`. Attestations are created in the active box by `attest`; `revoke` transfers them from the active box to the revoked box. The revoked box is terminal - attestations are never transferred away from there.
 
 ## Attester identity: trust and gating
 
@@ -128,8 +121,8 @@ need not exist yet; `create_box` is only a prerequisite for `revoke`. `revoke`
 receives the attestation and moves it to the revoked box (address derived from
 the Box's stored `registry`), emitting `Revoked<T>`.
 
-The move and event stay uniform here; the *authority* does not. `revoke` is
-gated by `Permit<T>`, which only `T`'s defining module can mint, so the base
+The move and event stay uniform here; the *authority* does not. Because `revoke`
+is gated by `Permit<T>` (see "Attester identity: trust and gating"), the base
 prescribes no revocation policy — each schema gates its own `revoke_*` wrapper
 (bearer cap, admin cap, multisig, …) and then mints the permit. This costs the
 base nothing in expressiveness; every policy, including a per-attestation bearer

@@ -87,13 +87,6 @@ public fun subject<T: store>(self: &Attestation<T>): ID { self.subject }
 /// The typed payload.
 public fun data<T: store>(self: &Attestation<T>): &T { &self.data }
 
-/// The subject a `Box` holds attestations about.
-public fun box_subject(box: &Box): ID { box.key.subject }
-
-/// Whether `box` is the subject's revoked box. An attestation's status is
-/// `is_revoked` of the box that owns it.
-public fun is_revoked(box: &Box): bool { box.key.revoked }
-
 /// Original-publish address of `T`'s defining package. Useful for on-chain
 /// trust-list checks (e.g.
 /// `assert!(trust_list.contains(attester_of<Audit>()))`).

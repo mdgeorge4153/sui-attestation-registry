@@ -29,6 +29,8 @@ Duplicate this package and make it yours. The required changes are small:
 
 - Rename the package — `name` in `Move.toml`, and the `auditor::` prefix on the
   `module` line in `audit.move` (e.g. `module acme_audits::audit;`).
+- Point the `attestations` dependency in `Move.toml` at the published registry
+  (via its mvr name) rather than the local path this template uses.
 - Set your presentation in `register_audit_display`: your display `name`, your
   report/brand icon (`image_url`), and the report-link template.
 - Replace this README with your auditing policy, or a link to it — it renders

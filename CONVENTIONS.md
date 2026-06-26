@@ -21,30 +21,10 @@ a consumer enumerating the active box only ever sees un-revoked attestations —
 no field to read, no `active` flag. No *current* convention adds further
 effectiveness conditions; the planned `expires_at` (see below) would.
 
-## Conventions
-
-### `publish_date`
-
-The publication date of the attested artifact (e.g. an audit report), surfaced
-as the `publish_date` Display field so consumers can show "published on …".
-**Informational** — it does not affect effectiveness. Rendered from a `u64` ms
-field via Display V2's `:ts` transform:
-
-```move
-fields.push_back(b"publish_date".to_string());
-values.push_back(b"{data.publish_date_ms:ts}".to_string());
-```
-
-Because it's a Display field it's *attester-supplied* — an attester could
-backdate it. That's an accepted trade-off: tamper-proof publication time would
-need on-chain timestamping in the core (a `Clock` read inside `attest`), out of
-scope for an off-chain-primary registry. A consumer needing a trustworthy "first
-seen" can use the attestation object's on-chain creation time instead.
-
 ## Presentation fields
 
-These don't affect effectiveness; they're how an attestation renders. They
-reuse the **standard Sui Display field names**, so an `Attestation<T>` shows up
+These don't affect effectiveness; they're how an attestation renders. Most reuse
+the **standard Sui Display field names**, so an `Attestation<T>` shows up
 sensibly in any Display-aware tool (wallets, explorers), not just bespoke
 consumers.
 
@@ -54,6 +34,11 @@ consumers.
 - **`image_url`** — an image for the attestation: a grade badge, report
   thumbnail, etc.
 - **`link`** — a URL to the full artifact (the audit report, the CVE record).
+- **`publish_date`** — publication date of the attested artifact (e.g. an audit
+  report), so consumers can show "published on …". Rendered from a `u64` ms field
+  via Display V2's `:ts` transform (`{data.publish_date_ms:ts}`). It's
+  *attester-supplied*, so it can be backdated — a consumer needing a trustworthy
+  "first seen" should use the attestation object's on-chain creation time instead.
 
 ```move
 fields.push_back(b"link".to_string());

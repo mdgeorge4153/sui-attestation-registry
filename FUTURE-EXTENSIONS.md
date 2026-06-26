@@ -12,8 +12,8 @@ by value are `attest` (constructs) and `revoke` (receives via
 `transfer::receive` and moves the attestation to the subject's revoked box).
 Accessors (`subject`, `data`) exist but are unreachable from outside the package
 because no public function returns an `Attestation<T>` or hands out a
-`&Attestation<T>`. An attestation's status is which box owns it
-(`is_revoked`), not a field on the attestation.
+`&Attestation<T>`. An attestation's status is which box owns it, not a field on
+the attestation.
 
 This is intentional. We don't have a concrete on-chain consumer (verifier
 contract, compositional attestation, gating contract) in the PoC, so the

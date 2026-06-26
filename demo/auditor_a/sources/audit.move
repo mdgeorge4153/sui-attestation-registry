@@ -6,9 +6,7 @@ use sui::display_registry::DisplayRegistry;
 use sui::transfer::Receiving;
 use attestations::attestations::{Registry, Box, Attestation};
 
-/// Audit attestation payload. Defined here so auditor is the
-/// `Permit<Audit>` minting authority and the recorded attester for every
-/// `Attestation<Audit>` is auditor's published address.
+/// Audit attestation payload. Lifecycle for `Attestation<Audit>` is controlled by the `AuditAdminCap`
 public struct Audit has store, drop {
     /// Human-readable summary of the audit, surfaced via the `description`
     /// presentation field.
@@ -22,9 +20,7 @@ public struct Audit has store, drop {
 
 /// Single-party authority to *control* this auditor's attestations: whoever
 /// holds this cap can both issue and revoke any `Attestation<Audit>`. Created
-/// once at publish and transferred to the publisher. This is one
-/// authority-policy choice among many — the base registry prescribes none;
-/// each schema picks its own and supplies the `Permit` `revoke` requires.
+/// once at publish and transferred to the publisher.
 public struct AuditAdminCap has key, store {
     id: UID,
 }
@@ -65,8 +61,7 @@ public fun register_audit_display(
 }
 
 /// Issue an `Attestation<Audit>` about `subject`. Gated by the `AuditAdminCap`,
-/// the single authority over this auditor's attestations; mints the
-/// `Permit<Audit>` the registry's `attest` requires (only this module can).
+/// the single authority over this auditor's attestations.
 public fun attest_audit(
     _: &AuditAdminCap,
     registry: &Registry,
@@ -84,8 +79,8 @@ public fun attest_audit(
     );
 }
 
-/// Revoke an `Attestation<Audit>`. Gated by the `AuditAdminCap`; mints the
-/// `Permit<Audit>` the registry's `revoke` requires (only this module can).
+/// Revoke an `Attestation<Audit>` that is owned by `box`, which must be the non-revoked box that owns the attestation indicated by `rcv`.
+/// Gated by the `AuditAdminCap`.
 public fun revoke_audit(
     _: &AuditAdminCap,
     box: &mut Box,

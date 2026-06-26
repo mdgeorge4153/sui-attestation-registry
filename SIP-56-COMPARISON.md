@@ -96,15 +96,16 @@ This PoC has no registration step at all. Any Move type `T` can be used as
 optional step gated by `Permit<T>`.
 
 **Why this is an improvement**:
-- *Display immutability* is achieved without a registration step by
-  freezing a module-private `DisplayLock<T>` wrapper that holds the
-  `DisplayCap`. This is the **same freeze-a-wrapper mechanism** SIP-56's
-  PR-evolved design uses (amnn's `AttestationType<T>` proposal wraps
-  `DisplayCap` and freezes it). The only difference is that SIP-56 also
-  wires its frozen wrapper into authorization (passing
-  `&AttestationType<T>` to `attest`), while this PoC's `DisplayLock<T>`
-  has no further role after registration. The Display-immutability
-  property is identical.
+- *Display safety* is achieved without a registration step. `register_display<T>`
+  (gated by `Permit<T>`) publishes the `Display<Attestation<T>>` and **parks**
+  its `DisplayCap` on the Registry rather than destroying or freezing it. The
+  Display is **append-only**: `add_display_field<T>` (also `Permit<T>`-gated) can
+  add new fields but aborts on any field name already set, and no public path
+  exposes overwrite/unset/clear — so a schema can grow its template over time but
+  can't rewrite or remove existing fields. SIP-56 instead freezes an
+  `AttestationType<T>` wrapper around the `DisplayCap` for full immutability;
+  this PoC trades that for append-only flexibility, with no registration ceremony
+  and no wrapper wired into authorization (authorization is just `Permit<T>`).
 - *Type self-discoverability* is treated here as an off-chain concern.
   Indexers can enumerate `Attestation<T>` instances by struct-type filter
   (via `getOwnedObjects`); a wallet wanting "all known attestation types"
@@ -121,12 +122,13 @@ keypair that signed the transaction.
 This PoC's attester (emitted on the `Attested` event) is `T`'s defining
 package address, resolved at mint time via `type_name::original_id<T>()`.
 
-The mechanism: `attest<T>(registry, subject, data: T, ctx)` takes a `T`
-value, and Move's construction rules restrict producing a `T` to `T`'s
+The mechanism: `attest<T>(registry, _: Permit<T>, subject, data, ctx)` is
+gated by `Permit<T>`, and Move restricts minting a `Permit<T>` to `T`'s
 defining module. So the existence of an `Attestation<T>` on-chain is
-**bytecode proof** that `T`'s defining package's code path was taken to
-mint it. No separate permit or capability is needed; the type system
-already enforces this.
+**bytecode proof** that `T`'s defining package's code path minted the permit
+that authorized it. The authority is the permit, not the signer — so the same
+guarantee holds even for a schema that exposes a permissionless `attest`
+wrapper (it still mints the permit; an outside caller can't forge one).
 
 **Why this is an improvement**: for a trust-signal primitive, "this came
 from the protocol that defined the type" is a stronger and more useful
@@ -149,8 +151,9 @@ public struct UserAudit has store, drop {
 public fun attest_user_audit(
     registry: &Registry, subject: ID, score: u8, ctx: &mut TxContext,
 ): ID {
-    attestations::attest<UserAudit>(
+    attestations::attest(
         registry,
+        std::internal::permit<UserAudit>(),
         subject,
         UserAudit { score, sender: ctx.sender() },
         ctx,
@@ -244,9 +247,12 @@ attestations.
   per-subject UID needed for revoke (and any future state-change
   operation).
 
-The Box is created explicitly (`create_box(registry, subject)`) before
-the first attest for a subject. This adds a one-time setup cost per
-subject in exchange for the two properties above.
+The Box is created explicitly (`create_box(registry, subject)`, which is
+idempotent and claims both the active and revoked box). It's a prerequisite
+for `revoke`, not `attest` — `attest` transfers to the derived active-box
+*address* whether or not a Box object exists there yet — so the only cost is a
+one-time setup before a subject's first revoke, in exchange for the two
+properties above.
 
 ### 6. Event shape: phantom `T` + `subject` only
 
@@ -266,22 +272,22 @@ Other fields are denormalization — they appear in tx effects or in the
 attestation's own state, so duplicating them in the event is a
 maintenance hazard (two sources of truth) without information gain.
 
-### 7. Revocation status by box membership, and event-recorded revoker
+### 7. Revocation status by box membership, no status field
 
 SIP-56's attestation struct has `revoked_by: Option<address>` —
 `None` means active, `Some(addr)` records who revoked.
 
 This PoC stores no status on the struct at all: revocation is encoded by
 *which* box owns the attestation (live in the active box, revoked in the
-sink), and revoker identity goes in the `Revoked` event.
+sink). The `Revoked<T>` event carries only `subject`; the revoker is not
+recorded anywhere on-chain by the registry.
 
-**Why this is an improvement**: the revoker is in the tx context already
-(`tx.sender()` of the revoke tx); the event carries it explicitly for
-indexer convenience. Storing it on the struct is denormalization with the
-same "two sources of truth" hazard as the event-field case. And encoding
-revoked-vs-live as box membership means the common read — "all the live
-attestations about S" — is a single `getOwnedObjects` on the active box
-with no per-object status field to filter on.
+**Why this is an improvement**: the revoker is already in the revoke tx's
+effects (`tx.sender()`), recoverable by any indexer. Storing it on the struct
+— or denormalizing it onto the event — is a "two sources of truth" hazard for
+no information gain. And encoding revoked-vs-live as box membership means the
+common read — "all the live attestations about S" — is a single
+`getOwnedObjects` on the active box with no per-object status field to filter on.
 
 ### 8. Revocation policy lives in the schema, not the core
 
@@ -337,7 +343,7 @@ plays out in this PoC:
 | Pinning: hide vs. highlight | Switched to highlight | Removed entirely (consumer concern) |
 | Modifying attestations | Receive-modify-retransfer via derived addresses | Adopted as receive-and-retransfer: `revoke` moves the attestation between derived addresses, no in-place mutation |
 | Authorization scheme | Sender → `*Cap` pattern | Diverged: `Permit<T>` gating (schema chooses cap / admin / multisig) |
-| Display immutability | Frozen `AttestationType<T>` wraps `DisplayCap` | Same freeze-a-wrapper mechanism (`DisplayLock<T>`) |
+| Display immutability | Frozen `AttestationType<T>` wraps `DisplayCap` | Append-only Display: `DisplayCap` parked on the Registry, `add_display_field` aborts on an existing field |
 | Self-discoverable types | Frontends fetch list via on-chain `AttestationType<T>` | Off-chain via event subscription |
 | Derived addresses timeline | Acknowledged as months out; PoC initially worked around it | This PoC is built directly on them |
 
