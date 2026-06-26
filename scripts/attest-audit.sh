@@ -10,4 +10,4 @@ AUDITPKG=$1; CAP=$2; REGISTRY=$3; SUBJECT=$4; DESC=$5; URL=$6; PUBDATE=$7
 sui client ptb \
     --move-call "$AUDITPKG::audit::attest_audit" "@$CAP" "@$REGISTRY" "@$SUBJECT" "\"$DESC\"" "\"$URL\"" "$PUBDATE" \
     --json \
-  | jq -r '.objectChanges[] | select(.objectType | contains("::Attestation<")) | .objectId'
+  | jq -r 'first(.objectChanges[] | select(.objectType | contains("::Attestation<")) | .objectId)'

@@ -13,6 +13,7 @@ out=$(sui client ptb \
 
 # create_box makes two boxes; echo the active one (BoxKey.revoked == false).
 for box in $(echo "$out" | jq -r '.objectChanges[] | select(.objectType | endswith("::Box")) | .objectId'); do
-    [ "$(sui client object "$box" --json | jq -r '.content.key.revoked')" = false ] && { echo "$box"; exit 0; }
+    revoked=$(sui client object "$box" --json | jq -r '.content.key.revoked')
+    [ "$revoked" = false ] && { echo "$box"; exit 0; }
 done
 echo "create-box: no active box created" >&2; exit 1

@@ -84,7 +84,7 @@ echo "▶ attest_audit_v2 on subject (score 95, the live signal)"
 SUBJ_AUDIT_V2=$(sui client ptb \
     --move-call "$AUDIT::audit_v2::attest_audit_v2" "@$CAP" "@$REGISTRY" "@$SUBJ" '"Subject audit (v2) — passed"' '"https://audits.example.com/subject-v1.pdf"' "$PUBDATE" 95 \
     --json \
-  | jq -r '.objectChanges[] | select(.objectType | contains("::AuditV2>")) | .objectId')
+  | jq -r 'first(.objectChanges[] | select(.objectType | contains("::AuditV2>")) | .objectId)')
 echo "  $SUBJ_AUDIT_V2"
 
 echo "▶ attest_audit on subject (v1, will be revoked)"

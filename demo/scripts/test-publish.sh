@@ -114,16 +114,13 @@ for pkg in packages/attestations demo/auditor_a demo/auditor_b demo/dependency_e
     fi
     echo "  ok"
     if [[ "$name" == "attestations" ]]; then
-        json=$(extract_json "$json_out" || true)
+        json=$(extract_json "$json_out")
         if [[ -n "$json" ]]; then
-            REGISTRY_ID=$(python3 -c "
-import json, sys
-r = json.loads(sys.stdin.read())
-for c in r.get('objectChanges', []):
-    t = c.get('objectType', '')
-    if t.endswith('::attestations::Registry') and c.get('type') == 'created':
-        print(c['objectId']); break
-" <<<"$json")
+            REGISTRY_ID=$(printf '%s' "$json" | jq -r '
+                first(.objectChanges[]?
+                    | select(.type == "created"
+                        and (.objectType // "" | endswith("::attestations::Registry")))
+                    | .objectId) // empty')
         fi
     fi
     rm -f "$json_out"
