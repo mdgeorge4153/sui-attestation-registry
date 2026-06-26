@@ -65,25 +65,6 @@ echo "shared pubfile: $PUBFILE"
 
 REGISTRY_ID=""
 
-# Find the substring [start..end] of `data` that's a balanced JSON object,
-# parse it, and dump it back. Tolerates non-JSON text around the JSON block
-# (compiler warnings, status lines, etc.). On failure prints nothing.
-extract_json() {
-    python3 - "$1" <<'PY'
-import sys, json
-data = open(sys.argv[1]).read()
-start = data.find('{')
-end = data.rfind('}')
-if start < 0 or end <= start:
-    sys.exit(0)
-try:
-    json.dumps(json.loads(data[start:end+1]))
-except Exception:
-    sys.exit(0)
-print(data[start:end+1])
-PY
-}
-
 # Read a field ("published-at", "original-id", "upgrade-capability") from the
 # pubfile [[published]] block whose source dir matches the given package name.
 parse_pkg_field() {
@@ -103,27 +84,26 @@ for pkg in packages/attestations demo/auditor_a demo/auditor_b demo/dependency_e
     name=$(basename "$pkg")
     echo
     echo "▶ test-publish $name"
-    json_out=$(mktemp)
+    json_out=$(mktemp); err_out=$(mktemp)
     if ! (cd "$REPO_ROOT/$pkg" \
             && "$SUI" client test-publish --build-env testnet --pubfile-path "$PUBFILE" --gas-budget "$GAS_BUDGET" --json) \
-            > "$json_out" 2>&1; then
+            > "$json_out" 2>"$err_out"; then
         echo "  FAILED. Output:"
-        cat "$json_out"
-        rm -f "$json_out"
+        cat "$err_out" "$json_out"
+        rm -f "$json_out" "$err_out"
         exit 1
     fi
     echo "  ok"
+    # --json writes the result object to stdout (build logs go to stderr), so jq
+    # reads it straight from json_out.
     if [[ "$name" == "attestations" ]]; then
-        json=$(extract_json "$json_out")
-        if [[ -n "$json" ]]; then
-            REGISTRY_ID=$(printf '%s' "$json" | jq -r '
-                first(.objectChanges[]?
-                    | select(.type == "created"
-                        and (.objectType // "" | endswith("::attestations::Registry")))
-                    | .objectId) // empty')
-        fi
+        REGISTRY_ID=$(jq -r '
+            first(.objectChanges[]?
+                | select(.type == "created"
+                    and (.objectType // "" | endswith("::attestations::Registry")))
+                | .objectId) // empty' "$json_out")
     fi
-    rm -f "$json_out"
+    rm -f "$json_out" "$err_out"
 done
 
 # --- Upgrade auditor_a to add the AuditV2 schema. test-upgrade reads the

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end demo, composed from the CLI ops in scripts/ (create-box,
-# attest-audit, revoke-audit) plus a few inline `sui client ptb` calls. Replaces
-# the old TS demo — every on-chain action here is a plain CLI
-# move-call a user could run by hand.
+# attest-audit, revoke-audit) plus a few inline `sui client ptb` calls — every
+# on-chain action here is a plain CLI move-call a user could run by hand.
 #
 # Scenario (mirrors the scenario in demo/README.md):
 #   - the dependency has two published versions (v1, v2); audit v1 (Audit, stays
