@@ -1,34 +1,154 @@
-# `auditor` — a reusable attestation schema
+# `auditor` — attestation schema template
 
-A reference schema package: a worked example of how a third-party attester
-defines its own attestation type and controls who may issue and revoke it. Copy
-it to stand up your own auditor identity — the demo does exactly that
-(`demo/auditor_a`, `demo/auditor_b`).
+`auditor` is a copyable template for **becoming an attester**. It defines an
+`Audit` attestation type and the `AuditAdminCap` that authorizes issuing and
+revoking it. The attester recorded on every `Attestation<Audit>` is *this
+package's on-chain identity*, so trust flows from whoever controls the package —
+not from the transaction signer. (Why that holds, and how consumers read and
+revoke attestations, is the registry's concern — see the registry repo's
+`DESIGN.md`.)
 
-## The schema
+This README walks a new auditor from the template to publishing live reports.
+
+## What's in the package
+
+The Move code (`sources/audit.move`) defines three things you'll work with:
 
 - **`Audit`** — a completed review: a human-readable description, a link to the
-  full report, and the report's publication date. (The demo's `AuditV2` upgrade
-  adds a numeric score on top of these.)
+  full report, and the report's publication date.
 - **`AuditAdminCap`** — the single authority that may issue or revoke this
-  auditor's attestations (minted at publish, sent to the publisher). This is one
-  authority-policy choice; the base registry prescribes none.
-
-(The demo's `demo/auditor_a` layers an `AuditV2` upgrade on top of this schema to
-illustrate schema evolution — that upgrade is demo-only, not part of the
-reference.)
-
-How the recorded attester is anchored to this package's identity, and how
-consumers read and revoke attestations, is the registry's concern — see the
-registry repo's `DESIGN.md`.
+  auditor's attestations, minted at publish and sent to the publisher.
+- **`register_audit_display`** — run once after publishing, so your attestations
+  render in wallets and explorers with your name, icon, and report links.
 
 ## Standing up your own auditor
 
-A real auditor copies this package as a starting point. High level (TODO: expand
-into a proper guide, possibly its own top-level doc):
+### 1. Copy and customize the template
 
-- Register an MVR name for your package.
-- Publish your own copy.
-- Custody your `UpgradeCap` and the `AuditAdminCap` minted at publish.
-- Replace this README with your auditing policy, or a link to your docs.
+Duplicate this package and make it yours. The required changes are small:
 
+- Rename the package — `name` in `Move.toml`, and the `auditor::` prefix on the
+  `module` line (e.g. `module ottersec::audit;`).
+- Set your presentation in `register_audit_display`: your display `name`, your
+  report/brand icon (`image_url`), and the report-link template.
+- Replace this README with your auditing policy, or a link to it — it renders
+  on your package's MVR page, so it's what others read to decide to trust you.
+
+Those are the only changes you need. Beyond them, you can extend `Audit` with
+extra fields if you want more structured on-chain metadata — just note that the
+registry and general consumers only act on the standard Display conventions
+(see `CONVENTIONS.md`); anything else is yours to define and interpret.
+
+### 2. Publish and register
+
+Publish on **mainnet** — where the registry lives and where mvr names are
+registered:
+
+```sh
+sui client switch --env mainnet
+sui client publish
+```
+
+From the output, note three ids you'll need:
+
+- your **package id** — listed under *Published Objects*;
+- your **`AuditAdminCap`** and the package's **`UpgradeCap`** — under *Created
+  Objects*, matched by the object types ending `::audit::AuditAdminCap` and
+  `0x2::package::UpgradeCap`. Both were sent to you; custody them in step 3.
+
+You'll also need the registry's shared **`Registry` object id** from its mainnet
+deployment — used in the call below and every time you issue.
+
+Register your Display once so `Attestation<Audit>` objects render with your name,
+icon, and report links (`0xd` is the system display registry):
+
+```sh
+sui client call --package <your-pkg> --module audit \
+  --function register_audit_display --args <registry-object-id> 0xd
+```
+
+Finally, register **a mvr name** for the package and link its git source, so it
+resolves by name and your README renders on its page — see the
+[mvr docs](https://docs.suins.io/move-registry).
+
+### 3. Custody your capabilities securely
+
+Two objects authorize everything you do — the **`AuditAdminCap`** (issuing and
+revoking) and the **`UpgradeCap`** (changing the schema). Treat them like signing
+keys: whoever holds them can attest in your name.
+
+Hold them in a **multisig** (≥ 2-of-N, kept cold), not a single hot key. Set one
+up and transfer both caps to its address; from then on, issuing and revoking are
+transactions your multisig signs and executes. One tool for managing the
+multisig and for proposing, signing, and executing those transactions is
+[Sagat](https://docs.sui.io/sui-stack/sagat), Mysten's Sui multisig manager.
+
+### 4. Publish reports
+
+Each report is one `attest_audit` call:
+
+```sh
+sui client ptb \
+  --move-call <your-pkg>::audit::attest_audit \
+    @<admin-cap> @<registry> @<subject> '"<description>"' '"<report-url>"' <publish-date-ms> \
+  --sender <multisig-address> \
+  --serialize-unsigned-transaction > attest-tx.b64
+```
+
+`<subject>` is the id of the package (or any object) you reviewed, and
+`<publish-date-ms>` is the publication date in milliseconds since the Unix epoch.
+In a `--move-call` target, the package can be its mvr name — e.g. the
+`@your-org/audits` you registered — instead of an address; the object arguments
+(`@<registry>`, `@<admin-cap>`, …) still take addresses.
+
+This writes the unsigned transaction bytes to `attest-tx.b64`, with the multisig
+as sender; hand that file to your multisig to sign to threshold and execute — for
+example, propose it in Sagat.
+
+To **backfill historical reports**, you can put many `attest_audit` calls in one
+PTB — one transaction for your whole back catalogue. (A single PTB is capped at
+1024 commands, with transaction-size and gas limits biting sooner, so a very
+large catalogue may span a few transactions.)
+
+```sh
+sui client ptb \
+  --move-call <your-pkg>::audit::attest_audit @<admin-cap> @<registry> @<subjectA> '"..."' '"..."' <date> \
+  --move-call <your-pkg>::audit::attest_audit @<admin-cap> @<registry> @<subjectB> '"..."' '"..."' <date> \
+  --sender <multisig-address> \
+  --serialize-unsigned-transaction > backfill-tx.b64
+```
+
+## Revoking an attestation
+
+To withdraw or supersede a report, revoke its attestation with the same
+`AuditAdminCap`. The registry stores each subject's attestations in a *box*, and
+revoking moves the attestation from the subject's *active* box to its *revoked*
+box — consumers stop treating it as live, but it stays on-chain and auditable.
+
+Revoking reads that box, so it must exist first (issuing doesn't need it). If it
+doesn't yet, create it — this needs no cap, so run it directly (`<registry-pkg>`
+is the registry's package id):
+
+```sh
+sui client ptb --move-call <registry-pkg>::attestations::create_box @<registry> @<subject>
+```
+
+Then build the revoke the same way you build an issue:
+
+```sh
+sui client ptb \
+  --move-call <your-pkg>::audit::revoke_audit @<admin-cap> @<active-box> @<attestation-id> \
+  --sender <multisig-address> \
+  --serialize-unsigned-transaction > revoke-tx.b64
+```
+
+`<active-box>` is the box that currently owns the attestation, and
+`<attestation-id>` is the attestation to revoke — passed with `@` so it resolves
+as the `Receiving` argument. Sign and execute through your multisig, as with an
+issue.
+
+## Learn more
+
+- Attester-identity model and registry design — the registry repo's `DESIGN.md`.
+- Display field conventions (`name`, `description`, `image_url`, `link`,
+  `publish_date`) — `CONVENTIONS.md`.
