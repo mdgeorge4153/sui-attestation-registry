@@ -126,6 +126,12 @@ cat > "$DEMO_IDS" <<EOF
       "latestId": "$AUDIT"
     }
   ],
+  "untrustedAttestors": [
+    {
+      "name": "auditor_b",
+      "id": "$AUDITOR_B"
+    }
+  ],
   "createdAttestations": {
     "dependencyAudit": "$DEP_AUDIT",
     "subjectAuditV2": "$SUBJ_AUDIT_V2"
