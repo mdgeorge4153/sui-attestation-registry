@@ -28,7 +28,7 @@ The Move code (`sources/audit.move`) defines three things you'll work with:
 Duplicate this package and make it yours. The required changes are small:
 
 - Rename the package — `name` in `Move.toml`, and the `auditor::` prefix on the
-  `module` line (e.g. `module ottersec::audit;`).
+  `module` line in `audit.move` (e.g. `module acme_audits::audit;`).
 - Set your presentation in `register_audit_display`: your display `name`, your
   report/brand icon (`image_url`), and the report-link template.
 - Replace this README with your auditing policy, or a link to it — it renders
@@ -41,8 +41,7 @@ registry and general consumers only act on the standard Display conventions
 
 ### 2. Publish and register
 
-Publish on **mainnet** — where the registry lives and where mvr names are
-registered:
+Publish the package on mainnet:
 
 ```sh
 sui client switch --env mainnet
@@ -85,7 +84,7 @@ multisig and for proposing, signing, and executing those transactions is
 
 ### 4. Publish reports
 
-Each report is one `attest_audit` call:
+Publishing a report requires one `attest_audit` call:
 
 ```sh
 sui client ptb \
@@ -99,16 +98,15 @@ sui client ptb \
 `<publish-date-ms>` is the publication date in milliseconds since the Unix epoch.
 In a `--move-call` target, the package can be its mvr name — e.g. the
 `@your-org/audits` you registered — instead of an address; the object arguments
-(`@<registry>`, `@<admin-cap>`, …) still take addresses.
+(`@<registry>`, `@<admin-cap>`, …) must be addresses.
 
 This writes the unsigned transaction bytes to `attest-tx.b64`, with the multisig
-as sender; hand that file to your multisig to sign to threshold and execute — for
-example, propose it in Sagat.
+as sender; hand that file to your multisig to sign to threshold and execute (for
+example by proposing it in Sagat).
 
 To **backfill historical reports**, you can put many `attest_audit` calls in one
-PTB — one transaction for your whole back catalogue. (A single PTB is capped at
-1024 commands, with transaction-size and gas limits biting sooner, so a very
-large catalogue may span a few transactions.)
+PTB — one transaction for your whole back catalogue (a large catalogue may hit
+transaction size limits, in which case you can break the PTB into multiple PTBs).
 
 ```sh
 sui client ptb \
@@ -133,7 +131,7 @@ is the registry's package id):
 sui client ptb --move-call <registry-pkg>::attestations::create_box @<registry> @<subject>
 ```
 
-Then build the revoke the same way you build an issue:
+Then build the revoke transaction the same way you build an attestation:
 
 ```sh
 sui client ptb \
@@ -145,7 +143,7 @@ sui client ptb \
 `<active-box>` is the box that currently owns the attestation, and
 `<attestation-id>` is the attestation to revoke — passed with `@` so it resolves
 as the `Receiving` argument. Sign and execute through your multisig, as with an
-issue.
+attestation transaction.
 
 ## Learn more
 
