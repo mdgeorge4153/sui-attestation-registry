@@ -116,6 +116,32 @@ sui client ptb \
   --serialize-unsigned-transaction > backfill-tx.b64
 ```
 
+## Listing your attestations
+
+To see every attestation you've issued, query the mainnet GraphQL endpoint
+(`https://graphql.mainnet.sui.io/graphql`) for objects of your attestation type.
+For `Audit`, that's
+`<registry-pkg>::attestations::Attestation<<your-pkg>::audit::Audit>`:
+
+```graphql
+query {
+  objects(
+    filter: { type: "<registry-pkg>::attestations::Attestation<<your-pkg>::audit::Audit>" }
+    # add `after: "<endCursor>"` (from pageInfo) to page through large result sets
+  ) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      address
+      asMoveObject { contents { json } }
+    }
+  }
+}
+```
+
+Each node is one attestation; `contents.json` carries its `subject` and your
+`Audit` fields. If you've added attestation types in an upgrade (e.g. `AuditV2`),
+query each type the same way.
+
 ## Revoking an attestation
 
 To withdraw or supersede a report, revoke its attestation with the same
