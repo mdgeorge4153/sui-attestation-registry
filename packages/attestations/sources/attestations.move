@@ -9,14 +9,10 @@ use sui::event;
 use sui::transfer::Receiving;
 
 #[error(code = 0)]
-const EBoxAlreadyExists: vector<u8> =
-    b"Boxes already exist for this subject";
-
-#[error(code = 1)]
 const ERevokeFromWrongBox: vector<u8> =
     b"Pass the subject's active Box to revoke, not its revoked one";
 
-#[error(code = 2)]
+#[error(code = 1)]
 const EFieldExists: vector<u8> =
     b"Display field already exists; add_display_field is append-only";
 
@@ -75,8 +71,8 @@ public struct Revoked<phantom T> has copy, drop {
 
 // === Setup ===
 
-/// Create and share a subject's two `Box`es (active + revoked). Aborts
-/// `EBoxAlreadyExists` if they already exist.
+/// Create and share a subject's two `Box`es (active + revoked). Idempotent: a
+/// no-op for either box that already exists.
 public fun create_box(registry: &mut Registry, subject: ID) {
     let registry_id = object::id(registry);
     registry.claim_box(registry_id, BoxKey { subject, revoked: false });
@@ -220,9 +216,10 @@ fun init(ctx: &mut TxContext) {
     transfer::share_object(Registry { id: object::new(ctx) });
 }
 
-/// Claim and share one box for `key`.
+/// Claim and share one box for `key`, or do nothing if it already exists (so
+/// `create_box` is idempotent).
 fun claim_box(registry: &mut Registry, registry_id: ID, key: BoxKey) {
-    assert!(!derived_object::exists(&registry.id, key), EBoxAlreadyExists);
+    if (derived_object::exists(&registry.id, key)) return;
     let id = derived_object::claim(&mut registry.id, key);
     transfer::share_object(Box { id, key, registry: registry_id });
 }

@@ -44,7 +44,8 @@ Registry (shared singleton)
 - **`Registry`** is a `key`-only shared singleton, created in `init`; its UID is
   the parent for all per-subject boxes.
 - **`Box`** is `key`-only and per-subject. `create_box` claims *both* boxes for
-  a subject at once (aborting `EBoxAlreadyExists` on a repeat). Each box address
+  a subject at once, and is idempotent (a no-op for boxes that already exist, so
+  a revoker can always call it before `revoke`). Each box address
   is `derived_object::derive_address(registry, BoxKey { subject, revoked })` —
   *computable off-chain* from `(registry_id, subject_id)`. Consumers read a
   subject's un-revoked attestations from the active box via

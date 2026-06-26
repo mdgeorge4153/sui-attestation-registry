@@ -9,7 +9,6 @@ use attestations::attestations::{
     Registry,
     Box,
     Attestation,
-    EBoxAlreadyExists,
     ERevokeFromWrongBox,
 };
 
@@ -46,8 +45,8 @@ fun box_id(registry: &Registry, subject: ID, revoked: bool): ID {
     object::id_from_address(registry.box_address(subject, revoked))
 }
 
-#[test, expected_failure(abort_code = EBoxAlreadyExists)]
-fun create_box_aborts_on_duplicate() {
+#[test]
+fun create_box_is_idempotent() {
     let subject = subject_for(@0xDEAD);
     let mut scenario = test_scenario::begin(ALICE);
     attestations::init_for_testing(scenario.ctx());
@@ -55,8 +54,14 @@ fun create_box_aborts_on_duplicate() {
     scenario.next_tx(ALICE);
     let mut registry: Registry = scenario.take_shared();
     registry.create_box(subject);
-    registry.create_box(subject);
+    registry.create_box(subject); // idempotent: the second call is a no-op
+    let active = box_id(&registry, subject, false);
     test_scenario::return_shared(registry);
+
+    // The box created by the first call is intact and still shared.
+    scenario.next_tx(ALICE);
+    let box: Box = scenario.take_shared_by_id(active);
+    test_scenario::return_shared(box);
     scenario.end();
 }
 
