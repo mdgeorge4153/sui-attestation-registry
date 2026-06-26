@@ -123,9 +123,9 @@ To withdraw or supersede a report, revoke its attestation with the same
 revoking moves the attestation from the subject's *active* box to its *revoked*
 box — consumers stop treating it as live, but it stays on-chain and auditable.
 
-Revoking reads that box, so it must exist first (issuing doesn't need it). If it
-doesn't yet, create it — this needs no cap, so run it directly (`<registry-pkg>`
-is the registry's package id):
+Revoking works on that box, so it must exist (issuing doesn't need it).
+`create_box` is idempotent, so just run it — no cap needed, so execute it
+directly (`<registry-pkg>` is the registry's package id):
 
 ```sh
 sui client ptb --move-call <registry-pkg>::attestations::create_box @<registry> @<subject>
@@ -140,10 +140,10 @@ sui client ptb \
   --serialize-unsigned-transaction > revoke-tx.b64
 ```
 
-`<active-box>` is the box that currently owns the attestation, and
-`<attestation-id>` is the attestation to revoke — passed with `@` so it resolves
-as the `Receiving` argument. Sign and execute through your multisig, as with an
-attestation transaction.
+`<active-box>` is the box that owns the attestation — its current owner, which
+`sui client object <attestation-id>` shows. `<attestation-id>` is the attestation
+to revoke, passed with `@` so it resolves as the `Receiving` argument. Sign and
+execute through your multisig, as with an attestation transaction.
 
 ## Learn more
 
