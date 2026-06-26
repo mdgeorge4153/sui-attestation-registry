@@ -23,10 +23,10 @@ a consumer surfaces one and ignores the other purely by package address.
 ## Subjects
 
 - **`dependency_example/`** — a package that gets audited; a dependency of
-  `subject_example`. It's **upgraded to a second version** in the demo: v2 (the
-  latest) is audited, v1 is left unaudited, so the mvr version selector switches
-  between an audited and an unaudited version of the same package — and the
-  default (latest) view is the audited one.
+  `subject_example`. It's **upgraded to a second version** in the demo: v1 is
+  audited but v2 (the latest) is left unaudited, so the mvr Security page shows
+  the latest version as unaudited while an older version was audited — the
+  security signal that an audit doesn't carry across an upgrade.
 - **`subject_example/`** — the package a viewer browses; depends on
   `dependency_example`.
 
@@ -38,8 +38,8 @@ a consumer surfaces one and ignores the other purely by package address.
 
 | Subject | Attestation | Status |
 |---|---|---|
-| `@demo/dependency` v2 (latest) | Audit (no findings) | **Active** |
-| `@demo/dependency` v1 | *(none)* | — |
+| `@demo/dependency` v1 | Audit (no findings) | **Active** |
+| `@demo/dependency` v2 (latest) | *(none)* | — |
 | `@demo/subject` | AuditV2 (score 95) | **Active** |
 | `@demo/subject` | Audit (v1, superseded) | **Revoked** |
 | `@demo/subject` | Audit (Auditor B) | **Active** |
@@ -52,8 +52,8 @@ Every attestation is issued by `auditor_a` except the Auditor B one.
 sees only the **`AuditV2` (score 95)** attestation on `@demo/subject`: the v1
 `Audit` is revoked, the Auditor B `Audit` is filtered out by attester *identity*
 (same type, different package), and the `InternalNote` has no registered Display.
-`@demo/dependency` has two versions — v2 (the latest) is audited (Active), v1 is
-left unaudited — so the version selector switches between an audited version and
-one showing the "no published audits" warning.
+`@demo/dependency` has two versions — v1 is audited (Active) but v2 (the latest)
+is left unaudited — so the Security page shows the latest version with a "no
+published audits" warning alongside the audited older version.
 Revoked attestations remain readable from each subject's revoked box — a consumer
 typically lists them separately so they don't read as endorsements.
